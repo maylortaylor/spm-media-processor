@@ -31,6 +31,9 @@ import argparse
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+load_dotenv()
+
 
 def _add_output_dir(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--output-dir', type=Path, default=None,
