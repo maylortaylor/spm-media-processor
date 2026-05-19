@@ -1,0 +1,11 @@
+{
+  "ffmpeg_path": "ffmpeg",
+  "ffprobe_path": "ffprobe",
+  "google_calendar_id": "your-calendar-id@group.calendar.google.com",
+  "default_output_dir": null,
+  "claude_model": "claude-sonnet-4-6",
+  "single_band_threshold_min": 75,
+  "gap_db": 12.0,
+  "gap_sec": 30.0,
+  "min_segment_min": 5
+}

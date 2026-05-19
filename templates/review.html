@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SPM Media Processor — Review Segments</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #111; color: #eee; }
+  header { background: #1a1a2e; padding: 16px 24px; border-bottom: 1px solid #333; }
+  header h1 { font-size: 1.2rem; color: #7eb8ff; margin-bottom: 4px; }
+  header .meta { font-size: 0.85rem; color: #aaa; }
+  header .bands-on-bill { font-size: 0.85rem; color: #ffcf77; margin-top: 6px; }
+  .main { display: grid; grid-template-columns: 1fr 340px; height: calc(100vh - 80px); }
+
+  .waveform-panel { padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  .waveform-wrap { background: #1c1c1c; border-radius: 8px; padding: 12px; }
+  .waveform-label { font-size: 0.8rem; color: #888; margin-bottom: 8px; }
+  #waveform { border-radius: 4px; overflow: hidden; }
+  #timeline { margin-top: 2px; }
+
+  .controls { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .controls button { background: #2a2a3e; border: 1px solid #444; color: #ccc; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+  .controls button:hover { background: #3a3a5e; }
+  .controls button.active { background: #3a5ebf; border-color: #5a7edf; }
+  .zoom-hint { font-size: 0.75rem; color: #666; }
+
+  .marker-display {
+    font-size: 0.85rem;
+    color: #ffcf77;
+    font-variant-numeric: tabular-nums;
+    padding: 4px 10px;
+    background: #1c1c1c;
+    border: 1px solid #444;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+
+  .segments-panel { background: #161616; border-left: 1px solid #2a2a2a; padding: 16px; overflow-y: auto; }
+  .segments-panel h2 { font-size: 0.95rem; color: #aaa; margin-bottom: 8px; }
+  .btn-merge-all { width: 100%; background: #2a1a4a; border: 1px solid #6a4aaf; color: #cc99ff; padding: 7px; border-radius: 6px; cursor: pointer; font-size: 0.82rem; margin-bottom: 8px; }
+  .btn-merge-all:hover { background: #3a2a6a; }
+
+  .btn-merge-selected {
+    width: 100%;
+    background: #1a3a4a;
+    border: 1px solid #3a7aaf;
+    color: #88ccff;
+    padding: 7px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .btn-merge-selected:hover { background: #2a4a6a; }
+  .btn-merge-selected.visible { display: block; }
+
+  .segment-card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 12px; margin-bottom: 10px; transition: border-color 0.2s; }
+  .segment-card.approved { border-color: #3a8a3a; }
+  .segment-card.deleted { opacity: 0.3; pointer-events: none; }
+  .seg-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 6px; }
+  .seg-id { font-size: 0.75rem; color: #666; }
+  .seg-times { font-size: 0.8rem; color: #999; font-variant-numeric: tabular-nums; margin-bottom: 8px; }
+  .seg-duration { font-size: 0.75rem; color: #666; }
+
+  .seg-label-row { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .seg-label { flex: 1; background: #111; border: 1px solid #444; color: #eee; padding: 5px 8px; border-radius: 4px; font-size: 0.85rem; list-style: none; }
+  .seg-label:focus { outline: none; border-color: #7eb8ff; }
+  input[list].seg-label { }
+
+  .seg-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn-approve { flex: 1; background: #1a4a1a; border: 1px solid #3a6a3a; color: #7cfc7c; padding: 5px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+  .btn-approve:hover { background: #2a6a2a; }
+  .btn-approve.is-approved { background: #2a6a2a; color: #aaffaa; }
+  .btn-delete { background: #3a1a1a; border: 1px solid #6a3a3a; color: #ff8888; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+  .btn-delete:hover { background: #5a2a2a; }
+  .btn-locate { background: #1a2a4a; border: 1px solid #3a4a6a; color: #88aaff; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+  .btn-locate:hover { background: #2a3a6a; }
+
+  .btn-set-time {
+    background: #2a1a3a;
+    border: 1px solid #6a3a8a;
+    color: #cc88ff;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.78rem;
+  }
+  .btn-set-time:hover { background: #3a2a5a; }
+  .btn-set-time.error { border-color: #ff4444; color: #ff8888; }
+
+  .seg-select {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #7eb8ff;
+    flex-shrink: 0;
+  }
+
+  .save-bar { position: sticky; bottom: 0; background: #111; border-top: 1px solid #333; padding: 12px 16px; }
+  .btn-save { width: 100%; background: #1a4a8a; border: 1px solid #3a7adf; color: #fff; padding: 10px; border-radius: 6px; cursor: pointer; font-size: 0.95rem; font-weight: 600; }
+  .btn-save:hover { background: #2a5aaa; }
+  .btn-save:disabled { opacity: 0.4; cursor: default; }
+  .save-status { font-size: 0.8rem; color: #aaa; text-align: center; margin-top: 6px; min-height: 1.2em; }
+
+  datalist { display: none; }
+  .loading { padding: 40px; text-align: center; color: #666; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="event-title">Loading...</h1>
+  <div class="meta" id="event-meta"></div>
+  <div class="bands-on-bill" id="bands-on-bill"></div>
+</header>
+
+<div class="main">
+  <div class="waveform-panel">
+    <div class="waveform-wrap">
+      <div class="waveform-label" id="source-label">Loading audio...</div>
+      <div id="waveform"></div>
+      <div id="timeline"></div>
+      <div class="controls">
+        <button id="btn-play">▶ Play</button>
+        <button id="btn-zoom-in">Zoom In</button>
+        <button id="btn-zoom-out">Zoom Out</button>
+        <button id="btn-zoom-fit">Fit</button>
+        <span class="zoom-hint">Drag regions to adjust. Scroll to zoom.</span>
+        <span class="marker-display" id="marker-display">Marker: 00:00:00</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="segments-panel">
+    <h2>Segments</h2>
+    <button class="btn-merge-all" id="btn-merge-all" onclick="mergeAll()">⊕ Merge All → 1 Artist</button>
+    <button class="btn-merge-selected" id="btn-merge-selected" onclick="mergeSelected()">⊕ Merge Selected</button>
+    <div id="segments-list"><div class="loading">Loading segments...</div></div>
+    <div class="save-bar">
+      <button class="btn-save" id="btn-save">Save &amp; Close</button>
+      <div class="save-status" id="save-status"></div>
+    </div>
+  </div>
+</div>
+
+<datalist id="band-suggestions"></datalist>
+
+<script type="module">
+import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js';
+import RegionsPlugin from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js';
+import TimelinePlugin from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/timeline.esm.js';
+
+const COLORS = [
+  'rgba(126,184,255,0.3)',
+  'rgba(255,207,119,0.3)',
+  'rgba(124,252,124,0.3)',
+  'rgba(255,140,140,0.3)',
+  'rgba(200,140,255,0.3)',
+  'rgba(100,220,220,0.3)',
+];
+
+let segmentsData = null;
+let scanData = null;
+let wsRegions = null;
+let ws = null;
+let zoomLevel = 20;
+
+let currentTime = 0;
+let nextSegId = 1;
+const selectedSegments = new Set();
+
+function formatTime(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  return [h, m, s].map(v => String(v).padStart(2, '0')).join(':');
+}
+
+function formatDuration(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}m ${s}s`;
+}
+
+function flashError(el, message) {
+  const original = el.textContent;
+  el.classList.add('error');
+  el.textContent = message;
+  setTimeout(() => {
+    el.classList.remove('error');
+    el.textContent = original;
+  }, 1800);
+}
+
+function updateMergeSelectedVisibility() {
+  const btn = document.getElementById('btn-merge-selected');
+  if (!btn) return;
+  if (selectedSegments.size >= 2) {
+    btn.classList.add('visible');
+    btn.textContent = `⊕ Merge Selected (${selectedSegments.size})`;
+  } else {
+    btn.classList.remove('visible');
+  }
+}
+
+// Load band suggestions
+async function loadBands() {
+  const res = await fetch('/bands');
+  const data = await res.json();
+  const dl = document.getElementById('band-suggestions');
+  dl.innerHTML = data.bands.map(b => `<option value="${b}">`).join('');
+}
+
+// Load scan result for event info
+async function loadScan() {
+  try {
+    const res = await fetch('/scan');
+    scanData = await res.json();
+  } catch {}
+}
+
+// Load segments data
+async function loadData() {
+  const res = await fetch('/data');
+  segmentsData = await res.json();
+}
+
+function renderHeader() {
+  if (scanData) {
+    document.getElementById('event-title').textContent =
+      scanData.event_name || scanData.folder_name || 'Review Segments';
+    document.getElementById('event-meta').textContent =
+      [scanData.event_date, scanData.notes].filter(Boolean).join(' — ');
+    if (scanData.bands && scanData.bands.length) {
+      document.getElementById('bands-on-bill').textContent =
+        'Bands on the bill: ' + scanData.bands.join(', ');
+    }
+  }
+
+  if (segmentsData && segmentsData.source_file) {
+    const parts = segmentsData.source_file.replace(/\\/g, '/').split('/');
+    document.getElementById('source-label').textContent = parts[parts.length - 1];
+  }
+}
+
+function renderSegmentsList() {
+  selectedSegments.clear();
+  updateMergeSelectedVisibility();
+
+  const list = document.getElementById('segments-list');
+  const segs = segmentsData.segments || [];
+  if (!segs.length) {
+    list.innerHTML = '<div class="loading">No segments detected.</div>';
+    return;
+  }
+
+  list.innerHTML = segs.map((seg, i) => {
+    const duration = seg.end - seg.start;
+    const isApproved = seg.approved;
+    return `
+      <div class="segment-card ${isApproved ? 'approved' : ''}" id="card-${seg.id}">
+        <div class="seg-header">
+          <input type="checkbox" class="seg-select"
+            onchange="toggleSegmentSelect(${seg.id}, this.checked)">
+          <span class="seg-id">Segment ${seg.id}</span>
+          <span class="seg-duration">${formatDuration(duration)}</span>
+        </div>
+        <div class="seg-times">
+          <span id="start-${seg.id}">${formatTime(seg.start)}</span>
+          &nbsp;→&nbsp;
+          <span id="end-${seg.id}">${formatTime(seg.end)}</span>
+        </div>
+        <div class="seg-label-row">
+          <input class="seg-label" type="text" list="band-suggestions"
+            id="label-${seg.id}" value="${seg.label || ''}"
+            placeholder="Band name (e.g. The Midnight)"
+            onchange="updateLabel(${seg.id}, this.value)">
+        </div>
+        <div class="seg-actions">
+          <button class="btn-locate" onclick="locateSegment(${seg.id}, 'start')">▶ Start</button>
+          <button class="btn-locate" onclick="locateSegment(${seg.id}, 'end')">▶ End</button>
+          <button class="btn-set-time" id="setstart-${seg.id}"
+            onclick="setSegmentTime(${seg.id}, 'start')">↑ Set Start</button>
+          <button class="btn-set-time" id="setend-${seg.id}"
+            onclick="setSegmentTime(${seg.id}, 'end')">↓ Set End</button>
+          <button class="btn-approve ${isApproved ? 'is-approved' : ''}" id="approve-${seg.id}"
+            onclick="toggleApprove(${seg.id})">
+            ${isApproved ? '✓ Approved' : 'Approve'}
+          </button>
+          <button class="btn-delete" onclick="deleteSegment(${seg.id})">✕</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function findSeg(id) {
+  return segmentsData.segments.find(s => s.id === id);
+}
+
+window.updateLabel = (id, value) => {
+  const seg = findSeg(id);
+  if (seg) seg.label = value;
+};
+
+window.toggleApprove = (id) => {
+  const seg = findSeg(id);
+  if (!seg) return;
+  seg.approved = !seg.approved;
+  const btn = document.getElementById(`approve-${id}`);
+  const card = document.getElementById(`card-${id}`);
+  btn.textContent = seg.approved ? '✓ Approved' : 'Approve';
+  btn.classList.toggle('is-approved', seg.approved);
+  card.classList.toggle('approved', seg.approved);
+};
+
+window.deleteSegment = (id) => {
+  selectedSegments.delete(id);
+  updateMergeSelectedVisibility();
+  segmentsData.segments = segmentsData.segments.filter(s => s.id !== id);
+  document.getElementById(`card-${id}`)?.remove();
+  if (wsRegions) {
+    const region = wsRegions.getRegions().find(r => r.id === `seg-${id}`);
+    if (region) region.remove();
+  }
+};
+
+window.mergeAll = () => {
+  const segs = segmentsData.segments;
+  if (!segs || segs.length === 0) return;
+  const label = segs.find(s => s.label && s.label !== `Set ${s.id}`)?.label || segs[0].label || '';
+  const merged = {
+    id: 1,
+    start: segs[0].start,
+    end: segs[segs.length - 1].end,
+    start_hhmmss: segs[0].start_hhmmss,
+    end_hhmmss: segs[segs.length - 1].end_hhmmss,
+    label,
+    approved: true,
+  };
+  segmentsData.segments = [merged];
+  renderSegmentsList();
+  addRegions();
+  document.getElementById('btn-merge-all').style.display = 'none';
+  selectedSegments.clear();
+  updateMergeSelectedVisibility();
+};
+
+window.mergeSelected = () => {
+  if (selectedSegments.size < 2) return;
+  const segs = segmentsData.segments;
+  const toMerge = segs
+    .filter(s => selectedSegments.has(s.id))
+    .sort((a, b) => a.start - b.start);
+  const newStart = Math.min(...toMerge.map(s => s.start));
+  const newEnd   = Math.max(...toMerge.map(s => s.end));
+  const label = toMerge.find(s => s.label && s.label !== `Set ${s.id}`)?.label
+    || toMerge[0].label || '';
+  const removedIds = new Set(toMerge.map(s => s.id));
+  segmentsData.segments = segs.filter(s => !removedIds.has(s.id));
+  if (wsRegions) {
+    wsRegions.getRegions()
+      .filter(r => removedIds.has(parseInt(r.id.replace('seg-', ''))))
+      .forEach(r => r.remove());
+  }
+  const newSeg = { id: nextSegId++, start: newStart, end: newEnd, label, approved: false };
+  segmentsData.segments.push(newSeg);
+  segmentsData.segments.sort((a, b) => a.start - b.start);
+  selectedSegments.clear();
+  renderSegmentsList();
+  addRegions();
+  updateMergeSelectedVisibility();
+};
+
+window.toggleSegmentSelect = (id, checked) => {
+  if (checked) selectedSegments.add(id);
+  else selectedSegments.delete(id);
+  updateMergeSelectedVisibility();
+};
+
+window.setSegmentTime = (id, which) => {
+  const seg = findSeg(id);
+  if (!seg || !ws) return;
+  const btn = document.getElementById(which === 'start' ? `setstart-${id}` : `setend-${id}`);
+  if (which === 'start' && currentTime >= seg.end) {
+    flashError(btn, 'Before end only'); return;
+  }
+  if (which === 'end' && currentTime <= seg.start) {
+    flashError(btn, 'After start only'); return;
+  }
+  seg[which] = currentTime;
+  document.getElementById(`${which}-${id}`).textContent = formatTime(currentTime);
+  const card = document.getElementById(`card-${id}`);
+  const durEl = card?.querySelector('.seg-duration');
+  if (durEl) durEl.textContent = formatDuration(seg.end - seg.start);
+  if (wsRegions) {
+    const region = wsRegions.getRegions().find(r => r.id === `seg-${id}`);
+    if (region) region.setOptions({ [which]: currentTime });
+  }
+};
+
+window.locateSegment = (id, position = 'start') => {
+  const seg = findSeg(id);
+  if (!seg || !ws) return;
+  const duration = ws.getDuration();
+  const seekTo = position === 'end'
+    ? Math.max(seg.end - 10, seg.start) / duration
+    : seg.start / duration;
+  ws.seekTo(seekTo);
+  ws.play();
+};
+
+function addRegions() {
+  if (!wsRegions) return;
+  wsRegions.clearRegions();
+  (segmentsData.segments || []).forEach((seg, i) => {
+    wsRegions.addRegion({
+      id: `seg-${seg.id}`,
+      start: seg.start,
+      end: seg.end,
+      color: COLORS[i % COLORS.length],
+      drag: true,
+      resize: true,
+    });
+  });
+}
+
+function zoomToFit() {
+  const container = document.getElementById('waveform');
+  const dur = ws.getDuration();
+  if (!container || !dur) return;
+  const fit = container.clientWidth / dur;
+  zoomLevel = Math.max(fit, 1);
+  ws.zoom(zoomLevel);
+}
+
+async function init() {
+  await Promise.all([loadData(), loadScan(), loadBands()]);
+
+  nextSegId = segmentsData.segments.length
+    ? Math.max(...segmentsData.segments.map(s => s.id)) + 1
+    : 1;
+
+  renderHeader();
+  renderSegmentsList();
+
+  if (!segmentsData || !segmentsData.audio_file) {
+    document.getElementById('waveform').innerHTML =
+      '<div class="loading">No audio file found. Run analyze first.</div>';
+    return;
+  }
+
+  const audioFilename = segmentsData.audio_file.replace(/\\/g, '/').split('/').pop();
+
+  document.getElementById('source-label').textContent = 'Generating waveform peaks (one-time)...';
+  let peaksData = null;
+  try {
+    const pr = await fetch(`/peaks/${encodeURIComponent(audioFilename)}`);
+    peaksData = pr.ok ? await pr.json() : null;
+  } catch {}
+
+  wsRegions = RegionsPlugin.create();
+  const timeline = TimelinePlugin.create({ container: '#timeline' });
+
+  const wsOpts = {
+    container: '#waveform',
+    waveColor: '#4a6a8a',
+    progressColor: '#7eb8ff',
+    url: `/audio/${encodeURIComponent(audioFilename)}`,
+    height: 100,
+    minPxPerSec: zoomLevel,
+    plugins: [wsRegions, timeline],
+  };
+  if (peaksData && peaksData.peaks && peaksData.peaks.length) {
+    wsOpts.peaks = [peaksData.peaks];
+    wsOpts.duration = peaksData.duration;
+  }
+
+  ws = WaveSurfer.create(wsOpts);
+
+  ws.on('ready', () => {
+    document.getElementById('source-label').textContent +=
+      ` (${formatDuration(ws.getDuration())})`;
+    addRegions();
+    zoomToFit();
+  });
+
+  ws.on('error', (err) => {
+    document.getElementById('waveform').innerHTML =
+      `<div class="loading">Error loading audio: ${err}</div>`;
+  });
+
+  // Track playhead position for Set Start / Set End
+  ws.on('timeupdate', (time) => {
+    currentTime = time;
+    document.getElementById('marker-display').textContent = 'Marker: ' + formatTime(time);
+  });
+
+  ws.on('interaction', () => {
+    const t = ws.getCurrentTime();
+    if (t !== undefined) {
+      currentTime = t;
+      document.getElementById('marker-display').textContent = 'Marker: ' + formatTime(t);
+    }
+  });
+
+  // Sync region drags back to data
+  wsRegions.on('region-updated', (region) => {
+    const id = parseInt(region.id.replace('seg-', ''));
+    const seg = findSeg(id);
+    if (!seg) return;
+    seg.start = region.start;
+    seg.end = region.end;
+    const startEl = document.getElementById(`start-${id}`);
+    const endEl = document.getElementById(`end-${id}`);
+    if (startEl) startEl.textContent = formatTime(region.start);
+    if (endEl) endEl.textContent = formatTime(region.end);
+  });
+
+  document.getElementById('btn-play').addEventListener('click', () => {
+    ws.playPause();
+    document.getElementById('btn-play').textContent = ws.isPlaying() ? '⏸ Pause' : '▶ Play';
+  });
+
+  ws.on('play', () => { document.getElementById('btn-play').textContent = '⏸ Pause'; });
+  ws.on('pause', () => { document.getElementById('btn-play').textContent = '▶ Play'; });
+  ws.on('finish', () => { document.getElementById('btn-play').textContent = '▶ Play'; });
+
+  document.getElementById('btn-zoom-in').addEventListener('click', () => {
+    zoomLevel = Math.min(zoomLevel * 1.5, 400);
+    ws.zoom(zoomLevel);
+  });
+
+  document.getElementById('btn-zoom-out').addEventListener('click', () => {
+    zoomLevel = Math.max(zoomLevel / 1.5, 1);
+    ws.zoom(zoomLevel);
+  });
+
+  document.getElementById('btn-zoom-fit').addEventListener('click', zoomToFit);
+
+  document.getElementById('btn-save').addEventListener('click', save);
+}
+
+async function save() {
+  const btn = document.getElementById('btn-save');
+  const status = document.getElementById('save-status');
+  btn.disabled = true;
+  status.textContent = 'Saving...';
+
+  // Sync labels from inputs before saving
+  (segmentsData.segments || []).forEach(seg => {
+    const input = document.getElementById(`label-${seg.id}`);
+    if (input) seg.label = input.value;
+  });
+
+  try {
+    const res = await fetch('/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(segmentsData),
+    });
+    if (res.ok) {
+      status.textContent = 'Saved! You can close this window.';
+    } else {
+      throw new Error('Server error');
+    }
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+    btn.disabled = false;
+  }
+}
+
+init();
+</script>
+</body>
+</html>

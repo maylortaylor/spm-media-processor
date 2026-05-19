@@ -1,0 +1,12 @@
+venv/
+config.json
+credentials.json
+token.json
+known_bands.json
+__pycache__/
+*.pyc
+.env
+*.mp3
+*_segments.json
+scan_result.json
+_processed/
