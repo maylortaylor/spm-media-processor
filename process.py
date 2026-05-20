@@ -13,6 +13,8 @@ Usage:
   python process.py rename     <folder> [--output-dir D] [--dry-run]
                                                                    Copy-rename images and short clips
   python process.py deep-batch <root-dir> [--output-dir D] [opts] Process all years under a root dir
+  python process.py clean-audio <target> [--output-dir D] [--mode M] [--notch-freq HZ] [--strength N]
+                                                                   Remove whine/noise from exported MP4s
 
 All commands read default_output_dir from config.json when --output-dir is not given.
 All intermediate files and output clips go to output_dir/event_folder_name/ — originals untouched.
@@ -101,6 +103,25 @@ def main() -> None:
     deep_p.add_argument('--gap-sec', type=float, default=None)
     deep_p.add_argument('--single-band-threshold', type=float, default=None)
 
+    clean_p = sub.add_parser('clean-audio', help='Remove high-pitched whine or noise from exported MP4s')
+    clean_p.add_argument('target', type=Path, nargs='?',
+                         help='Single .mp4 file or folder containing .mp4 files')
+    _add_output_dir(clean_p)
+    clean_p.add_argument('--mode', choices=['auto', 'notch', 'highcut'], default=None,
+                         help='Removal mode: auto (FFT denoiser), notch (single freq), highcut (lowpass 14kHz)')
+    clean_p.add_argument('--notch-freq', type=int, default=None, metavar='HZ',
+                         help='Frequency to notch in Hz (required for --mode notch)')
+    clean_p.add_argument('--strength', type=int, default=None, metavar='1-97',
+                         help='Denoiser strength for auto mode (default: 20; >40 may affect cymbals)')
+    clean_p.add_argument('--notch-harmonics', action='store_true',
+                         help='Also notch at 2x the --notch-freq (for harmonic whines)')
+    clean_p.add_argument('--preset', type=str, default=None, metavar='NAME',
+                         help='Apply a saved preset (overrides --mode / --notch-freq / --strength)')
+    clean_p.add_argument('--save-preset', type=str, default=None, metavar='NAME',
+                         help='Save current settings as a named preset')
+    clean_p.add_argument('--list-presets', action='store_true',
+                         help='List all saved presets and exit')
+
     args = parser.parse_args()
 
     if args.command == 'configure':
@@ -168,6 +189,30 @@ def main() -> None:
             gap_sec=gap_sec,
             single_band_threshold=threshold,
         )
+
+    elif args.command == 'clean-audio':
+        from audio_clean import run_clean_audio, list_presets
+        from config import load_config
+        if args.list_presets:
+            list_presets()
+        elif args.target is None:
+            print("Error: target is required unless --list-presets is set")
+        else:
+            cfg = load_config()
+            mode = args.mode if args.mode is not None else cfg.get('clean_audio_mode', 'auto')
+            strength = args.strength if args.strength is not None else cfg.get('clean_audio_strength', 20)
+            notch_freq = args.notch_freq if args.notch_freq is not None else cfg.get('clean_audio_notch_freq', None)
+            run_clean_audio(
+                args.target,
+                output_dir=args.output_dir,
+                mode=mode,
+                notch_freq=notch_freq,
+                strength=strength,
+                notch_harmonics=args.notch_harmonics,
+                preset=args.preset,
+                save_preset_name=args.save_preset,
+                config=cfg,
+            )
 
 
 if __name__ == '__main__':
