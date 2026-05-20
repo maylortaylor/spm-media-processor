@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPM Media Processor</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ── App Header ─────────────────────────────────────────────────────── -->
+<header id="app-header">
+  <h1>SPM Media Processor</h1>
+  <span id="header-path" class="text-muted"></span>
+  <div id="header-actions">
+    <button class="btn btn-sm" id="btn-change-folder">Change Folder</button>
+    <button class="btn btn-sm" id="btn-settings" title="Settings">⚙ Settings</button>
+  </div>
+</header>
+
+<!-- ── Main ───────────────────────────────────────────────────────────── -->
+<main id="main">
+
+  <!-- Entry screen -->
+  <div id="screen-entry" class="screen active">
+    <div class="entry-hero">
+      <h2>Select Year Folder</h2>
+      <p>Choose a folder containing event subfolders (e.g. <code>2025/</code>)</p>
+    </div>
+
+    <div class="entry-field">
+      <input type="text" id="year-folder-input" placeholder="/Volumes/Drive/EVENTS/2025/" style="flex:1">
+      <button class="btn" id="btn-browse">Browse…</button>
+    </div>
+
+    <div class="threshold-section">
+      <button class="threshold-toggle" id="threshold-toggle">
+        <span class="arrow">▶</span> Analysis thresholds (advanced)
+      </button>
+      <div class="threshold-body" id="threshold-body">
+        <div class="slider-row">
+          <label>Volume drop (gap_db)</label>
+          <input type="range" id="sl-gap-db" min="4" max="30" step="0.5" value="12">
+          <span class="val" id="val-gap-db">12</span> dB
+        </div>
+        <div class="slider-row">
+          <label>Min gap duration (gap_sec)</label>
+          <input type="range" id="sl-gap-sec" min="5" max="120" step="5" value="30">
+          <span class="val" id="val-gap-sec">30</span> sec
+        </div>
+        <div class="slider-row">
+          <label>Single-band threshold</label>
+          <input type="range" id="sl-single" min="15" max="180" step="5" value="75">
+          <span class="val" id="val-single">75</span> min
+        </div>
+      </div>
+    </div>
+
+    <div id="entry-warnings" class="hidden" style="background:#2a1a00;border:1px solid #6a4000;border-radius:8px;padding:12px 14px;font-size:0.82rem;color:#ffb050;"></div>
+
+    <button class="btn btn-primary" id="btn-load" style="width:100%;padding:12px;">
+      Load &amp; Scan All
+    </button>
+  </div>
+
+  <!-- Dashboard screen -->
+  <div id="screen-dashboard" class="screen">
+    <div class="dash-header">
+      <div class="dash-summary" id="dash-summary">0 events</div>
+      <div class="dash-bulk-actions">
+        <button class="btn btn-sm" id="btn-scan-pending">Scan Pending</button>
+        <button class="btn btn-sm" id="btn-analyze-all">Analyze Approved</button>
+        <button class="btn btn-sm" id="btn-export-all">Export Ready</button>
+        <button class="btn btn-sm" id="btn-metadata-all">Generate Metadata</button>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <button class="filter-chip active" data-filter="all">All</button>
+      <button class="filter-chip" data-filter="pending">Needs Attention</button>
+      <button class="filter-chip" data-filter="scanning">Scanning</button>
+      <button class="filter-chip" data-filter="approved">Approved</button>
+      <button class="filter-chip" data-filter="exported">Exported</button>
+      <button class="filter-chip" data-filter="skipped">Skipped</button>
+    </div>
+
+    <div class="event-grid" id="event-grid"></div>
+  </div>
+
+</main>
+
+<!-- ── Settings Panel ─────────────────────────────────────────────────── -->
+<div id="settings-overlay">
+  <div id="settings-panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h2>Settings</h2>
+      <button class="btn btn-sm" id="btn-close-settings">✕</button>
+    </div>
+
+    <div>
+      <h3>Paths</h3>
+      <div class="settings-field">
+        <label>FFmpeg path</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="cfg-ffmpeg" placeholder="ffmpeg">
+          <button class="btn btn-sm" id="btn-detect-ffmpeg">Auto-detect</button>
+        </div>
+      </div>
+      <div class="settings-field">
+        <label>FFprobe path</label>
+        <input type="text" id="cfg-ffprobe" placeholder="ffprobe">
+      </div>
+      <div class="settings-field">
+        <label>Default output directory</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="cfg-output-dir" placeholder="/path/to/_processed">
+          <button class="btn btn-sm" id="btn-browse-output">Browse…</button>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <h3>Analysis Thresholds</h3>
+      <div class="settings-field">
+        <label>Volume drop for gap (gap_db)</label>
+        <input type="number" id="cfg-gap-db" min="1" max="40" step="0.5">
+      </div>
+      <div class="settings-field">
+        <label>Min gap seconds (gap_sec)</label>
+        <input type="number" id="cfg-gap-sec" min="1" max="300" step="5">
+      </div>
+      <div class="settings-field">
+        <label>Single-band threshold (minutes)</label>
+        <input type="number" id="cfg-single-band" min="5" max="300" step="5">
+      </div>
+      <div class="settings-field">
+        <label>Min segment (minutes)</label>
+        <input type="number" id="cfg-min-seg" min="1" max="60" step="1">
+      </div>
+    </div>
+
+    <div>
+      <h3>Google Calendar</h3>
+      <div class="settings-field">
+        <label>Calendar ID</label>
+        <input type="text" id="cfg-calendar" placeholder="your-calendar-id@group.calendar.google.com">
+      </div>
+    </div>
+
+    <div>
+      <h3>Known Bands</h3>
+      <div class="band-manager">
+        <div class="band-manager-list" id="settings-bands-list"></div>
+        <div class="band-add-row">
+          <input type="text" id="settings-new-band" placeholder="Add band name…" list="bands-datalist-settings">
+          <button class="btn btn-sm" id="btn-add-band">Add</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="btn-save-settings" style="width:100%;">Save Settings</button>
+  </div>
+</div>
+
+<!-- ── Batch Progress Bar ──────────────────────────────────────────────── -->
+<div id="batch-progress">
+  <div class="batch-header">
+    <span class="batch-title" id="batch-title">Processing…</span>
+    <span id="batch-count" class="text-muted"></span>
+    <button class="btn btn-sm btn-danger" id="btn-cancel-batch">Cancel</button>
+    <button class="btn btn-sm" id="btn-close-batch">✕</button>
+  </div>
+  <div class="batch-progress-bar">
+    <div class="batch-progress-fill" id="batch-fill" style="width:0%"></div>
+  </div>
+  <div class="batch-folder-list" id="batch-folder-list"></div>
+</div>
+
+<!-- Shared datalist for band autocomplete -->
+<datalist id="bands-datalist"></datalist>
+<datalist id="bands-datalist-settings"></datalist>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
