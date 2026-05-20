@@ -1,14 +1,14 @@
 # spm-media-processor
 
-**St Pete Music (SPM) media processor** — a local CLI tool that turns raw live music recordings from Suite E Studios (St. Pete, FL) into trimmed, YouTube-ready clips.
+**St Pete Music (SPM) media processor** — turns raw live music recordings from Suite E Studios (St. Pete, FL) into trimmed, named, YouTube-ready clips with generated metadata.
 
-Built specifically for multi-band nights at Suite E where one continuous stream gets split by band, named correctly, and enriched with YouTube metadata for the St Pete Music channel.
+Built for multi-band nights at Suite E where one continuous stream gets split by band, named correctly, and enriched with YouTube metadata for the St Pete Music channel.
 
-**Non-destructive** — originals never touched. All output goes to `_processed/{event_folder_name}/`.
+**Non-destructive** — originals never touched. All output goes to a workspace folder (`_processed/{event_folder_name}/`).
 
 ---
 
-## Getting Started
+## GUI Quick Start (recommended)
 
 ### 1. Prerequisites
 
@@ -31,55 +31,145 @@ source venv/bin/activate       # Mac/Linux
 pip install -r requirements.txt
 ```
 
-### 3. Set your Anthropic API key
+### 3. Set your API key
 
-Create a `.env` file in the project root (gitignored):
+Create a `.env` file in the project root:
 
 ```bash
-# .env
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Or export it in your shell:
+### 4. Launch the GUI
+
+**Mac:** double-click `start_gui.command` in Finder, or:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+python gui_server.py
 ```
 
-The tool reads it automatically at startup. Without it, `scan` and `metadata` commands will fail.
+**Windows:** double-click `start_gui.bat`, or:
 
-### 4. Run the setup wizard
-
-```bash
-python process.py configure
+```cmd
+python gui_server.py
 ```
 
-This creates `config.json` (gitignored) with your local paths and preferences:
+A browser window opens automatically at `http://127.0.0.1:8765`.
 
-| Setting | Default | Description |
+---
+
+## GUI Workflow
+
+### Step 1 — Select a year folder
+
+Paste or browse to a folder that contains event subfolders (e.g. `EVENTS/2026/`). Hit **Load & Scan All**.
+
+```
+EVENTS/
+  2026/
+    03.15 - Final Friday/
+      stream.mp4
+    04.24 - future vintage, moonshow, mootbooxle/
+      full_show.mp4
+    05.16 - The Palms/
+      ...
+```
+
+### Step 2 — Review Claude's guesses
+
+After scanning, each event folder gets a card showing Claude's inferences from the folder name and your Google Calendar (if configured):
+
+- **Event name** — editable inline
+- **Bands** — badge list with add/remove; autocomplete from your known bands list
+- **Files** — which videos will be analyzed vs skipped
+- **Pipeline status** — which stages are done
+
+Hit **Approve ✓** on each card when the guesses look right. You can also skip events entirely.
+
+### Step 3 — Analyze, Review, Export
+
+Use the bulk action buttons in the dashboard header to run stages across all approved events at once:
+
+| Button | What it does |
+|---|---|
+| **Scan Pending** | Scans folders without a scan result yet (re-runs Claude) |
+| **Analyze Approved** | Detects set boundaries via audio volume for all approved events |
+| **Export Ready** | Cuts clips for all events where segments are approved |
+| **Generate Metadata** | Claude generates YouTube title/description/tags for all exported clips |
+
+Each action streams real-time log output. A progress bar at the bottom tracks batch operations.
+
+### Step 4 — Review waveform (multi-band events)
+
+For events with multiple bands, click **Review** on the card to open the waveform editor in a new tab. Drag region boundaries, label each segment with the band name, and click Save. The dashboard detects completion and updates the card automatically.
+
+### Step 5 — Before/after and metadata
+
+After export, each card shows the before (source files + sizes) and after (output clips + sizes). After metadata generation, the title, description, and tags appear inline on the card for final editing before uploading to YouTube.
+
+### Settings
+
+Click ⚙ in the top-right corner to edit:
+- FFmpeg path (with auto-detect)
+- Default output directory
+- Analysis thresholds (gap detection sensitivity)
+- Google Calendar ID
+- Known bands list (add/remove)
+
+---
+
+## Event folder naming
+
+The tool parses dates from folder names to look up the calendar and name output clips.
+
+**Expected format:** `MM.DD - Event Name` or `MM.DD.YYYY - Event Name`
+
+```
+2026/
+  03.15 - The Midnight After Party/
+  04.22.2026 - Final Friday/
+  05.16 - The Palms Open Mic/
+```
+
+Bands in the folder name (`04.24 - future vintage, moonshow, mootbooxle`) are also parsed as guesses. Claude cross-references the folder name, file names, and calendar to produce the final classification.
+
+---
+
+## Output files
+
+| File | Format |
+|---|---|
+| Exported clip | `MM.DD.YYYY - Band Name - Full Set.mp4` |
+| YouTube metadata | `MM.DD.YYYY - Band Name - Full Set_metadata.json` |
+| Renamed images | `MM.DD.YYYY - {Event} - phone image 01.jpg` |
+
+All output lands in the workspace: `_processed/{event_folder_name}/` (or `default_output_dir` in settings).
+
+---
+
+## File size categories
+
+| Category | Size | GUI behavior |
 |---|---|---|
-| `ffmpeg_path` | `ffmpeg` | Path to ffmpeg binary |
-| `ffprobe_path` | `ffprobe` | Path to ffprobe binary |
-| `google_calendar_id` | _(empty)_ | Suite E Google Calendar ID (optional) |
-| `default_output_dir` | `null` | Output root; null = `_processed/` inside each event folder |
-| `claude_model` | `claude-sonnet-4-6` | Claude model used for classify/metadata |
-| `single_band_threshold_min` | `75` | Videos shorter than this (min) auto-approve as single band |
-| `gap_db` | `12.0` | dB drop below peak that signals a between-set gap |
-| `gap_sec` | `30.0` | Seconds of quiet required to count as a real gap |
-| `min_segment_min` | `5` | Minimum segment length (minutes) to count as a real set |
+| `skip` | < 50 MB | Ignored |
+| `phone_clip` | 50 MB – 2 GB | Not analyzed (shown as skip) |
+| `short_set` | 2 – 8 GB | Analyzed |
+| `medium_stream` | 8 – 25 GB | Analyzed |
+| `full_stream` | 25 GB+ | Analyzed |
 
-### 5. (Optional) Google Calendar integration
+Videos ≤ `single_band_threshold_min` minutes (default 75) are auto-approved as a single band with no waveform review needed.
 
-Calendar lookup adds the event name to scan results automatically. Skip this if you don't need it.
+---
 
-1. Go to [console.cloud.google.com](https://console.cloud.google.com/)
-2. Create a project → enable **Google Calendar API**
-3. Create **OAuth2 credentials** (type: Desktop application)
-4. Download as `credentials.json` and place it in the project root
-5. Re-run `python process.py configure` and enter your calendar ID
-6. A browser window opens for one-time OAuth consent — `token.json` is saved for future runs
+## Analysis tuning
 
-Both `credentials.json` and `token.json` are gitignored.
+If the auto-detection cuts too aggressively or misses gaps, adjust the thresholds in ⚙ Settings (or the collapsible section on the entry screen):
+
+| Setting | Default | Fewer cuts | More cuts |
+|---|---|---|---|
+| Volume drop (gap_db) | 12 dB | Increase to 18–20 | Decrease to 8–10 |
+| Min gap duration (gap_sec) | 30 sec | Increase to 45–60 | Decrease to 15–20 |
+
+These can be overridden per-session on the entry screen without changing the saved config.
 
 ---
 
@@ -88,76 +178,52 @@ Both `credentials.json` and `token.json` are gitignored.
 | File | Purpose |
 |---|---|
 | `.env` | `ANTHROPIC_API_KEY` |
-| `config.json` | Your machine-specific config (created by `configure`) |
+| `config.json` | Machine-specific config (FFmpeg paths, thresholds, calendar ID) |
 | `credentials.json` | Google OAuth client secrets |
 | `token.json` | Google OAuth token (auto-created on first calendar auth) |
-| `known_bands.json` | Band names seen across sessions (auto-populated) |
+| `known_bands.json` | Band names seen across sessions (auto-populated, also editable in Settings) |
 | `venv/` | Python virtual environment |
-| `_processed/` | Output clips and intermediate files |
 
 ---
 
-## Event folder naming
+## Google Calendar (optional)
 
-The tool parses dates from folder names to look up the calendar and name output clips.
+Calendar lookup adds the event name automatically during scan.
 
-**Expected format:** `MM.DD - Band1 Band2` or `MM.DD.YYYY - Band1 Band2`
-
-```
-EVENTS/
-  2026/
-    03.15 - The Midnight After Party/
-      stream.mp4
-    04.22.2026 - Final Friday/
-      camera1.mov
-      camera2.mov
-```
-
-Folders that don't start with `MM.DD` are skipped by `batch` and `deep-batch`.
+1. Go to [console.cloud.google.com](https://console.cloud.google.com/)
+2. Create a project → enable **Google Calendar API**
+3. Create **OAuth2 credentials** (Desktop application type)
+4. Download as `credentials.json`, place in the project root
+5. Add your Calendar ID in ⚙ Settings
+6. On first use, a browser window opens for one-time OAuth consent
 
 ---
 
-## Pipeline (single event)
+## CLI usage (advanced)
 
-Run these commands in order for one event folder:
-
-| Step | Command | What it does |
-|---|---|---|
-| 1 | `python process.py scan <folder>` | Classify files, look up Google Calendar, identify bands via Claude |
-| 2 | `python process.py analyze <folder>` | Extract audio, detect set boundaries by volume |
-| 3 | `python process.py review <folder>` | Browser waveform review *(auto-skipped for short videos)* |
-| 4 | `python process.py export <folder>` | Cut clips (stream copy, no re-encode) |
-| 5 | `python process.py metadata <folder>` | Claude generates YouTube title/description/tags |
-
----
-
-## Batch commands
+The original CLI is still fully functional for scripting or headless use:
 
 ```bash
-# Process all events in a year folder
+source venv/bin/activate
+
+# Single event
+python process.py scan     "EVENTS/2026/04.24 - Final Friday"
+python process.py analyze  "EVENTS/2026/04.24 - Final Friday"
+python process.py review   "EVENTS/2026/04.24 - Final Friday"
+python process.py export   "EVENTS/2026/04.24 - Final Friday"
+python process.py metadata "EVENTS/2026/04.24 - Final Friday"
+
+# Batch (year folder)
 python process.py batch "EVENTS/2026/"
 
-# Process entire archive (multiple years) — preview first
+# Multi-year archive
 python process.py deep-batch "EVENTS/" --dry-run
 python process.py deep-batch "EVENTS/" --year 2026
 
-# Copy-rename images and short clips by EXIF camera source
-python process.py rename "03.24 - Band1 Band2" --dry-run
-python process.py rename "03.24 - Band1 Band2"
+# Rename images/short clips by EXIF camera
+python process.py rename "EVENTS/2026/04.24 - Final Friday" --dry-run
+python process.py rename "EVENTS/2026/04.24 - Final Friday"
+
+# First-time config
+python process.py configure
 ```
-
-Renamed files use format: `MM.DD.YYYY - {EventOrDay} - {device} image 01.jpg`  
-Device labels: `phone`, `canon`, `sony`, `nikon`, `camera` (unknown).
-
----
-
-## Detection Tuning
-
-If auto-detection cuts too aggressively or misses gaps:
-
-```bash
-python process.py analyze "folder" --gap-db 18 --gap-sec 45   # fewer cuts
-python process.py analyze "folder" --gap-db 8  --gap-sec 20   # more cuts
-```
-
-See `CLAUDE.md` for the full tuning guide and agent workflow reference.

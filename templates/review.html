@@ -113,6 +113,7 @@
   <h1 id="event-title">Loading...</h1>
   <div class="meta" id="event-meta"></div>
   <div class="bands-on-bill" id="bands-on-bill"></div>
+  <div id="source-filename" style="font-size:0.78rem;color:#666;margin-top:4px;font-family:monospace;"></div>
 </header>
 
 <div class="main">
@@ -240,7 +241,9 @@ function renderHeader() {
 
   if (segmentsData && segmentsData.source_file) {
     const parts = segmentsData.source_file.replace(/\\/g, '/').split('/');
-    document.getElementById('source-label').textContent = parts[parts.length - 1];
+    const fname = parts[parts.length - 1];
+    document.getElementById('source-label').textContent = fname;
+    document.getElementById('source-filename').textContent = fname;
   }
 }
 
