@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-'''
+"""
 SPM Media Processor CLI.
 
 Usage:
@@ -28,138 +28,174 @@ Options for deep-batch:
   --dry-run                   Preview folders without processing
   --year YYYY                 Only process this year (e.g. --year 2024)
   --no-rename                 Skip image/short-video renaming step
-'''
+"""
+
 import argparse
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
 def _add_output_dir(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument('--output-dir', type=Path, default=None,
-                        help='Where to write all outputs (overrides config.json default_output_dir)')
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Where to write all outputs (overrides config.json default_output_dir)",
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description='SPM Media Processor',
+        description="SPM Media Processor",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    sub = parser.add_subparsers(dest='command', required=True)
+    sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser('configure', help='Set up this machine (FFmpeg, Google Calendar, defaults)')
+    sub.add_parser("configure", help="Set up this machine (FFmpeg, Google Calendar, defaults)")
 
-    scan_p = sub.add_parser('scan', help='Classify files in a folder')
-    scan_p.add_argument('folder', type=Path)
+    scan_p = sub.add_parser("scan", help="Classify files in a folder")
+    scan_p.add_argument("folder", type=Path)
     _add_output_dir(scan_p)
 
-    analyze_p = sub.add_parser('analyze', help='Detect band segments from audio volume')
-    analyze_p.add_argument('folder', type=Path)
+    analyze_p = sub.add_parser("analyze", help="Detect band segments from audio volume")
+    analyze_p.add_argument("folder", type=Path)
     _add_output_dir(analyze_p)
-    analyze_p.add_argument('--gap-db', type=float, default=None)
-    analyze_p.add_argument('--gap-sec', type=float, default=None)
-    analyze_p.add_argument('--single-band-threshold', type=float, default=None)
+    analyze_p.add_argument("--gap-db", type=float, default=None)
+    analyze_p.add_argument("--gap-sec", type=float, default=None)
+    analyze_p.add_argument("--single-band-threshold", type=float, default=None)
 
-    review_p = sub.add_parser('review', help='Open browser review UI for long videos')
-    review_p.add_argument('folder', type=Path)
+    review_p = sub.add_parser("review", help="Open browser review UI for long videos")
+    review_p.add_argument("folder", type=Path)
     _add_output_dir(review_p)
 
-    export_p = sub.add_parser('export', help='Cut approved clips to output folder')
-    export_p.add_argument('folder', type=Path)
+    export_p = sub.add_parser("export", help="Cut approved clips to output folder")
+    export_p.add_argument("folder", type=Path)
     _add_output_dir(export_p)
 
-    meta_p = sub.add_parser('metadata', help='Generate YouTube metadata for exported clips')
-    meta_p.add_argument('folder', type=Path)
+    meta_p = sub.add_parser("metadata", help="Generate YouTube metadata for exported clips")
+    meta_p.add_argument("folder", type=Path)
     _add_output_dir(meta_p)
 
-    batch_p = sub.add_parser('batch', help='Process all event folders inside a year/root folder')
-    batch_p.add_argument('year_folder', type=Path,
-                         help='Folder containing event subfolders (e.g. EVENTS/2026/)')
+    batch_p = sub.add_parser("batch", help="Process all event folders inside a year/root folder")
+    batch_p.add_argument("year_folder", type=Path, help="Folder containing event subfolders (e.g. EVENTS/2026/)")
     _add_output_dir(batch_p)
-    batch_p.add_argument('--gap-db', type=float, default=None)
-    batch_p.add_argument('--gap-sec', type=float, default=None)
-    batch_p.add_argument('--single-band-threshold', type=float, default=None)
+    batch_p.add_argument("--gap-db", type=float, default=None)
+    batch_p.add_argument("--gap-sec", type=float, default=None)
+    batch_p.add_argument("--single-band-threshold", type=float, default=None)
 
-    rename_p = sub.add_parser('rename', help='Copy-rename images and short clips by EXIF source/date')
-    rename_p.add_argument('folder', type=Path)
+    rename_p = sub.add_parser("rename", help="Copy-rename images and short clips by EXIF source/date")
+    rename_p.add_argument("folder", type=Path)
     _add_output_dir(rename_p)
-    rename_p.add_argument('--dry-run', action='store_true',
-                          help='Preview renames without copying files')
+    rename_p.add_argument("--dry-run", action="store_true", help="Preview renames without copying files")
 
-    deep_p = sub.add_parser('deep-batch', help='Process all years/events under a root directory')
-    deep_p.add_argument('root_dir', type=Path,
-                        help='Root containing year subfolders (e.g. EVENTS/ with 2024/, 2025/, ...)')
+    deep_p = sub.add_parser("deep-batch", help="Process all years/events under a root directory")
+    deep_p.add_argument(
+        "root_dir", type=Path, help="Root containing year subfolders (e.g. EVENTS/ with 2024/, 2025/, ...)"
+    )
     _add_output_dir(deep_p)
-    deep_p.add_argument('--dry-run', action='store_true',
-                        help='Preview folders without processing')
-    deep_p.add_argument('--year', type=str, default=None, metavar='YYYY',
-                        help='Only process this year (e.g. --year 2024)')
-    deep_p.add_argument('--no-rename', action='store_true',
-                        help='Skip image/short-video renaming step')
-    deep_p.add_argument('--gap-db', type=float, default=None)
-    deep_p.add_argument('--gap-sec', type=float, default=None)
-    deep_p.add_argument('--single-band-threshold', type=float, default=None)
+    deep_p.add_argument("--dry-run", action="store_true", help="Preview folders without processing")
+    deep_p.add_argument(
+        "--year", type=str, default=None, metavar="YYYY", help="Only process this year (e.g. --year 2024)"
+    )
+    deep_p.add_argument("--no-rename", action="store_true", help="Skip image/short-video renaming step")
+    deep_p.add_argument("--gap-db", type=float, default=None)
+    deep_p.add_argument("--gap-sec", type=float, default=None)
+    deep_p.add_argument("--single-band-threshold", type=float, default=None)
 
-    clean_p = sub.add_parser('clean-audio', help='Remove high-pitched whine or noise from exported MP4s')
-    clean_p.add_argument('target', type=Path, nargs='?',
-                         help='Single .mp4 file or folder containing .mp4 files')
+    clean_p = sub.add_parser("clean-audio", help="Remove high-pitched whine or noise from exported MP4s")
+    clean_p.add_argument("target", type=Path, nargs="?", help="Single .mp4 file or folder containing .mp4 files")
     _add_output_dir(clean_p)
-    clean_p.add_argument('--mode', choices=['auto', 'notch', 'highcut'], default=None,
-                         help='Removal mode: auto (FFT denoiser), notch (single freq), highcut (lowpass 14kHz)')
-    clean_p.add_argument('--notch-freq', type=int, default=None, metavar='HZ',
-                         help='Frequency to notch in Hz (required for --mode notch)')
-    clean_p.add_argument('--strength', type=int, default=None, metavar='1-97',
-                         help='Denoiser strength for auto mode (default: 20; >40 may affect cymbals)')
-    clean_p.add_argument('--notch-harmonics', action='store_true',
-                         help='Also notch at 2x the --notch-freq (for harmonic whines)')
-    clean_p.add_argument('--preset', type=str, default=None, metavar='NAME',
-                         help='Apply a saved preset (overrides --mode / --notch-freq / --strength)')
-    clean_p.add_argument('--save-preset', type=str, default=None, metavar='NAME',
-                         help='Save current settings as a named preset')
-    clean_p.add_argument('--list-presets', action='store_true',
-                         help='List all saved presets and exit')
+    clean_p.add_argument(
+        "--mode",
+        choices=["auto", "notch", "highcut"],
+        default=None,
+        help="Removal mode: auto (FFT denoiser), notch (single freq), highcut (lowpass 14kHz)",
+    )
+    clean_p.add_argument(
+        "--notch-freq",
+        type=int,
+        default=None,
+        metavar="HZ",
+        help="Frequency to notch in Hz (required for --mode notch)",
+    )
+    clean_p.add_argument(
+        "--strength",
+        type=int,
+        default=None,
+        metavar="1-97",
+        help="Denoiser strength for auto mode (default: 20; >40 may affect cymbals)",
+    )
+    clean_p.add_argument(
+        "--notch-harmonics", action="store_true", help="Also notch at 2x the --notch-freq (for harmonic whines)"
+    )
+    clean_p.add_argument(
+        "--preset",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Apply a saved preset (overrides --mode / --notch-freq / --strength)",
+    )
+    clean_p.add_argument(
+        "--save-preset", type=str, default=None, metavar="NAME", help="Save current settings as a named preset"
+    )
+    clean_p.add_argument("--list-presets", action="store_true", help="List all saved presets and exit")
 
     args = parser.parse_args()
 
-    if args.command == 'configure':
+    if args.command == "configure":
         from configure import run_configure
+
         run_configure()
 
-    elif args.command == 'scan':
+    elif args.command == "scan":
         from classify import run_scan
+
         run_scan(args.folder, output_dir=args.output_dir)
 
-    elif args.command == 'analyze':
+    elif args.command == "analyze":
         from config import load_config
-        cfg = load_config()
-        gap_db = args.gap_db if args.gap_db is not None else cfg['gap_db']
-        gap_sec = args.gap_sec if args.gap_sec is not None else cfg['gap_sec']
-        threshold = args.single_band_threshold if args.single_band_threshold is not None else cfg['single_band_threshold_min']
-        from analyze import run_analyze
-        run_analyze(args.folder, output_dir=args.output_dir, gap_db=gap_db, gap_sec=gap_sec, single_band_threshold=threshold)
 
-    elif args.command == 'review':
+        cfg = load_config()
+        gap_db = args.gap_db if args.gap_db is not None else cfg["gap_db"]
+        gap_sec = args.gap_sec if args.gap_sec is not None else cfg["gap_sec"]
+        threshold = (
+            args.single_band_threshold if args.single_band_threshold is not None else cfg["single_band_threshold_min"]
+        )
+        from analyze import run_analyze
+
+        run_analyze(
+            args.folder, output_dir=args.output_dir, gap_db=gap_db, gap_sec=gap_sec, single_band_threshold=threshold
+        )
+
+    elif args.command == "review":
         from review_server import run_review
+
         run_review(args.folder, output_dir=args.output_dir)
 
-    elif args.command == 'export':
+    elif args.command == "export":
         from export import run_export
+
         run_export(args.folder, output_dir=args.output_dir)
 
-    elif args.command == 'metadata':
+    elif args.command == "metadata":
         from metadata import run_metadata
+
         run_metadata(args.folder, output_dir=args.output_dir)
 
-    elif args.command == 'batch':
+    elif args.command == "batch":
         from batch import run_batch
         from config import load_config
+
         cfg = load_config()
-        gap_db = args.gap_db if args.gap_db is not None else cfg['gap_db']
-        gap_sec = args.gap_sec if args.gap_sec is not None else cfg['gap_sec']
-        threshold = args.single_band_threshold if args.single_band_threshold is not None else cfg['single_band_threshold_min']
+        gap_db = args.gap_db if args.gap_db is not None else cfg["gap_db"]
+        gap_sec = args.gap_sec if args.gap_sec is not None else cfg["gap_sec"]
+        threshold = (
+            args.single_band_threshold if args.single_band_threshold is not None else cfg["single_band_threshold_min"]
+        )
         run_batch(
             args.year_folder,
             output_dir=args.output_dir,
@@ -168,17 +204,21 @@ def main() -> None:
             single_band_threshold=threshold,
         )
 
-    elif args.command == 'rename':
+    elif args.command == "rename":
         from rename_media import run_rename
+
         run_rename(args.folder, output_dir=args.output_dir, dry_run=args.dry_run)
 
-    elif args.command == 'deep-batch':
+    elif args.command == "deep-batch":
         from deep_batch import run_deep_batch
         from config import load_config
+
         cfg = load_config()
-        gap_db = args.gap_db if args.gap_db is not None else cfg['gap_db']
-        gap_sec = args.gap_sec if args.gap_sec is not None else cfg['gap_sec']
-        threshold = args.single_band_threshold if args.single_band_threshold is not None else cfg['single_band_threshold_min']
+        gap_db = args.gap_db if args.gap_db is not None else cfg["gap_db"]
+        gap_sec = args.gap_sec if args.gap_sec is not None else cfg["gap_sec"]
+        threshold = (
+            args.single_band_threshold if args.single_band_threshold is not None else cfg["single_band_threshold_min"]
+        )
         run_deep_batch(
             args.root_dir,
             output_dir=args.output_dir,
@@ -190,18 +230,19 @@ def main() -> None:
             single_band_threshold=threshold,
         )
 
-    elif args.command == 'clean-audio':
+    elif args.command == "clean-audio":
         from audio_clean import run_clean_audio, list_presets
         from config import load_config
+
         if args.list_presets:
             list_presets()
         elif args.target is None:
             print("Error: target is required unless --list-presets is set")
         else:
             cfg = load_config()
-            mode = args.mode if args.mode is not None else cfg.get('clean_audio_mode', 'auto')
-            strength = args.strength if args.strength is not None else cfg.get('clean_audio_strength', 20)
-            notch_freq = args.notch_freq if args.notch_freq is not None else cfg.get('clean_audio_notch_freq', None)
+            mode = args.mode if args.mode is not None else cfg.get("clean_audio_mode", "auto")
+            strength = args.strength if args.strength is not None else cfg.get("clean_audio_strength", 20)
+            notch_freq = args.notch_freq if args.notch_freq is not None else cfg.get("clean_audio_notch_freq", None)
             run_clean_audio(
                 args.target,
                 output_dir=args.output_dir,
@@ -215,5 +256,5 @@ def main() -> None:
             )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
