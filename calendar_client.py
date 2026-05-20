@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from datetime import date, timedelta
 
@@ -25,6 +26,7 @@ def authenticate():
             creds = flow.run_local_server(port=0)
         with open(TOKEN_FILE, 'w') as f:
             f.write(creds.to_json())
+        os.chmod(TOKEN_FILE, 0o600)
 
     return creds
 

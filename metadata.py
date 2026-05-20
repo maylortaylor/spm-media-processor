@@ -61,7 +61,7 @@ def run_metadata(folder: Path, output_dir: Path | None = None) -> None:
         print('No exported clips found in workspace. Run export first.')
         return
 
-    client = anthropic.Anthropic(api_key=''.join(os.environ.get('ANTHROPIC_API_KEY', '').split()))
+    client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
     event_date = scan_data.get('event_date', 'unknown date')
     event_name = scan_data.get('event_name', folder.name)
     notes = scan_data.get('notes', '')

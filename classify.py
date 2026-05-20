@@ -98,7 +98,7 @@ def scan_folder(folder: Path, output_dir: Path | None = None) -> dict:
     video_files = [f for f in files if f['type'] == 'video']
     print(f'Asking Claude to classify {len(video_files)} video file(s)...')
 
-    client = anthropic.Anthropic(api_key=''.join(os.environ.get('ANTHROPIC_API_KEY', '').split()))
+    client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
 
     file_list_text = '\n'.join(
         f'  {f["relative_path"]} ({f["size_gb"]} GB)'
