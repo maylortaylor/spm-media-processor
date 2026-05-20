@@ -1,0 +1,9 @@
+line-length = 120
+target-version = "py311"
+
+[lint]
+select = ["E", "F"]
+ignore = [
+  "E401",  # multiple imports on one line — bootstrap block in gui_server.py
+  "E501",  # line too long — tighten in a follow-up pass
+]
