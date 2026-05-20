@@ -15,6 +15,9 @@ DEFAULTS = {
     'gap_db': 12.0,
     'gap_sec': 30.0,
     'min_segment_min': 5,
+    'clean_audio_mode': 'auto',      # 'auto' | 'notch' | 'highcut'
+    'clean_audio_strength': 20,      # afftdn noise_reduction (1–97)
+    'clean_audio_notch_freq': None,  # Hz; only used in 'notch' mode
 }
 
 

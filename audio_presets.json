@@ -1,0 +1,8 @@
+{
+  "high-pitch whine remover": {
+    "mode": "notch",
+    "notch_freq": 8000,
+    "strength": 20,
+    "notch_harmonics": true
+  }
+}
