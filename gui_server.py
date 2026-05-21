@@ -41,7 +41,10 @@ from typing import Any, Generator
 from urllib.parse import unquote
 
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
+
+load_dotenv(override=True)
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -106,6 +109,10 @@ class _Job:
         # Replay lines buffered before SSE connected
         for line in self.lines:
             yield _sse_line(line)
+        # Job may have finished before SSE connected — sentinel was never queued
+        if self.status in ("done", "error"):
+            yield "data: __DONE__\n\n"
+            return
         while True:
             item = await self._queue.get()
             if item is None:
@@ -364,7 +371,8 @@ def _event_status(workspace: Path) -> dict:
     scan_exists = (workspace / "scan_result.json").exists()
     seg_files = list(workspace.glob("*_segments.json"))
     analyzed = len(seg_files) > 0
-    exports = list(workspace.glob("*.mp4"))
+    videos_dir = workspace / "VIDEOS"
+    exports = list(videos_dir.glob("*.mp4")) if videos_dir.exists() else []
 
     all_approved = False
     needs_review = False
@@ -382,6 +390,7 @@ def _event_status(workspace: Path) -> dict:
         all_approved = all(s == "approved" for s in statuses)
         needs_review = any(s == "pending" for s in statuses)
 
+    organized = (workspace / "PICS").exists() or (workspace / "CLIPS").exists() or videos_dir.exists()
     return {
         "scanned": scan_exists,
         "analyzed": analyzed,
@@ -389,6 +398,7 @@ def _event_status(workspace: Path) -> dict:
         "all_approved": all_approved,
         "exported": len(exports) > 0,
         "export_count": len(exports),
+        "organized": organized,
     }
 
 
@@ -472,7 +482,8 @@ async def get_exports(folder: str, output_dir: str = ""):
     folder_path = Path(folder)
     workspace = get_workspace(folder_path, Path(output_dir) if output_dir else None)
     exports = []
-    for mp4 in sorted(workspace.glob("*.mp4")):
+    videos_dir = workspace / "VIDEOS"
+    for mp4 in sorted(videos_dir.glob("*.mp4")) if videos_dir.exists() else []:
         size_mb = mp4.stat().st_size / 1024 / 1024
         meta_file = mp4.with_suffix("").with_name(mp4.stem + "_metadata.json")
         meta = None
@@ -691,6 +702,47 @@ async def start_export_batch(request: Request):
                 run_export(f, output_dir=output_dir)
                 done_count += 1
                 jobs.get(_batch._job_id).push_event({"type": "folder_done", "folder": f.name, "stage": "export"})
+            except Exception as exc:
+                jobs.get(_batch._job_id).push_event({"type": "folder_error", "folder": f.name, "error": str(exc)})
+            jobs.get(_batch._job_id).push_event({"type": "progress", "done": done_count, "total": total})
+        return {"done": done_count, "total": total}
+
+    job_id = jobs.submit(_batch)
+    _batch._job_id = job_id
+    return {"job_id": job_id}
+
+
+@app.post("/api/organize")
+async def start_organize(request: Request):
+    from organize import run_organize
+
+    body = await request.json()
+    folder = body.get("folder", "")
+    if not folder:
+        raise HTTPException(400, "folder required")
+    output_dir = _parse_output_dir(body.get("output_dir"))
+    job_id = jobs.submit(run_organize, Path(folder), output_dir, skip_confirm=True)
+    return {"job_id": job_id}
+
+
+@app.post("/api/organize-batch")
+async def start_organize_batch(request: Request):
+    from organize import run_organize
+
+    body = await request.json()
+    folders = body.get("folders", [])
+    output_dir = _parse_output_dir(body.get("output_dir"))
+
+    def _batch():
+        done_count = 0
+        total = len(folders)
+        for folder_str in folders:
+            f = Path(folder_str)
+            try:
+                print(f"\n[{f.name}] Organizing...")
+                run_organize(f, output_dir=output_dir, skip_confirm=True)
+                done_count += 1
+                jobs.get(_batch._job_id).push_event({"type": "folder_done", "folder": f.name, "stage": "organize"})
             except Exception as exc:
                 jobs.get(_batch._job_id).push_event({"type": "folder_error", "folder": f.name, "error": str(exc)})
             jobs.get(_batch._job_id).push_event({"type": "progress", "done": done_count, "total": total})

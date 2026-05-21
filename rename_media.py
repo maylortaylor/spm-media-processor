@@ -145,7 +145,7 @@ def resolve_context_label(event_date: date | None, scan_result: dict | None) -> 
     return "Unknown"
 
 
-def _load_scan_result(workspace: Path) -> dict | None:
+def load_scan_result(workspace: Path) -> dict | None:
     scan_file = workspace / "scan_result.json"
     if scan_file.exists():
         try:
@@ -166,7 +166,7 @@ def build_rename_plan(
         config = load_config()
 
     workspace = get_workspace(folder, output_dir)
-    scan_result = _load_scan_result(workspace)
+    scan_result = load_scan_result(workspace)
 
     event_date: date | None = None
     if scan_result and scan_result.get("event_date"):

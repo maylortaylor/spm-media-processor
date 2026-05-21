@@ -16,15 +16,18 @@ source venv/bin/activate
 python process.py scan        <folder>    # classify + calendar lookup
 python process.py analyze     <folder>    # detect set boundaries
 python process.py review      <folder>    # browser waveform review
-python process.py export      <folder>    # cut clips (stream copy, no re-encode)
+python process.py export      <folder>    # cut clips → workspace/VIDEOS/
+python process.py organize    <folder>    # sort source files into PICS/ CLIPS/ VIDEOS/ AUDIO/ misc/
 python process.py metadata    <folder>    # generate YouTube metadata JSON
-python process.py batch       <year-dir>  # scan → analyze → review → export per subfolder
+python process.py batch       <year-dir>  # scan → analyze → review → export → organize per subfolder
 python process.py rename      <folder>    # copy-rename images/short clips by EXIF source
 python process.py deep-batch  <root-dir>  # process all years under a root directory
 ```
 
 Required env var: `ANTHROPIC_API_KEY` (in `.env` or shell)
 FFmpeg must be installed and in PATH (or set in `config.json` / ⚙ Settings).
+
+**`.env` file** — use `override=True` semantics are in effect: values in `.env` always win over the shell environment. If running in an environment with a custom API proxy (LiteLLM, corp gateway), add `ANTHROPIC_BASE_URL=https://api.anthropic.com` to force direct Anthropic access.
 
 ---
 
@@ -46,8 +49,9 @@ The GUI is a **FastAPI server** (`gui_server.py`) that serves a browser-based da
 | `process.py` | CLI entry point (unchanged — GUI calls modules directly) |
 | `classify.py` | `scan_folder()` — Claude event classification |
 | `analyze.py` | `run_analyze()` — audio extraction + silencedetect |
-| `export.py` | `run_export()` — FFmpeg stream copy |
-| `metadata.py` | `run_metadata()` — Claude YouTube metadata |
+| `export.py` | `run_export()` — FFmpeg stream copy → `workspace/VIDEOS/` |
+| `organize.py` | `run_organize()` — sorts source files into PICS/ CLIPS/ VIDEOS/ AUDIO/ misc/ |
+| `metadata.py` | `run_metadata()` — Claude YouTube metadata (reads from `VIDEOS/`) |
 | `review_server.py` | Legacy CLI review server (unchanged, still works for CLI use) |
 | `config.py` | `load_config()`, `save_config()`, `load_known_bands()`, `save_known_band()`, `get_workspace()` |
 
@@ -69,6 +73,7 @@ The GUI is a **FastAPI server** (`gui_server.py`) that serves a browser-based da
 - `POST /api/scan`, `POST /api/scan-all`
 - `POST /api/analyze`, `POST /api/analyze-batch`
 - `POST /api/export`, `POST /api/export-batch`
+- `POST /api/organize`, `POST /api/organize-batch`
 - `POST /api/metadata`, `POST /api/metadata-batch`
 
 **Job streaming:**
@@ -97,7 +102,9 @@ When working on this codebase in the context of the GUI:
 
 4. **Review tab pattern** — `review.html` is served at `/review` and opened in a new browser tab per event. The dashboard polls `/api/workspace/segments` every 3 seconds to detect when the user saves and closes the review tab.
 
-5. **Batch concurrency** — `scan-all` runs up to 5 concurrent Claude calls (bounded by `threading.Semaphore(5)`). `analyze-batch` runs up to 3 concurrent (more CPU-heavy). Export is serial (disk I/O bound).
+5. **Batch concurrency** — `scan-all` runs up to 5 concurrent Claude calls (bounded by `threading.Semaphore(5)`). `analyze-batch` runs up to 3 concurrent (more CPU-heavy). Export and organize are serial (disk I/O bound).
+
+6. **SSE stream lifecycle** — jobs run in a `ThreadPoolExecutor`. If a job finishes before the SSE client connects, buffered lines are replayed and `__DONE__` is sent immediately (race condition fixed). If a job errors, `status = "error"` is set and `__DONE__` is still sent so the browser never hangs.
 
 ---
 
@@ -108,13 +115,14 @@ When working on this codebase in the context of the GUI:
 python process.py scan     "<folder>"   # identify bands + event via Claude
 python process.py analyze  "<folder>"   # detect set boundaries from audio
 python process.py review   "<folder>"   # browser UI (auto-skipped for short videos)
-python process.py export   "<folder>"   # cut clips
+python process.py export   "<folder>"   # cut clips → workspace/VIDEOS/
+python process.py organize "<folder>"   # sort source files into PICS/ CLIPS/ VIDEOS/ AUDIO/ misc/
 python process.py metadata "<folder>"   # generate YouTube metadata JSON
 ```
 
 ### Full year of events
 ```bash
-python process.py batch "EVENTS/2026/"  # scan + analyze + review + export per subfolder
+python process.py batch "EVENTS/2026/"  # scan + analyze + review + export + organize per subfolder
 ```
 
 ### Multi-year archive
@@ -164,14 +172,20 @@ _processed/
     {filename}_audio.mp3          ← Extracted 64kbps audio for analysis
     {filename}_segments.json      ← Segment time ranges + labels + approval
     {filename}_peaks.json         ← Waveform peaks cache for review.html
-    MM.DD.YYYY - Band - Full Set.mp4
-    MM.DD.YYYY - Band - Full Set_metadata.json
-    renamed/
-      MM.DD.YYYY - Event - phone image 01.jpg
     rename_manifest.json
+    VIDEOS/                       ← Exported clips (stream copy, no re-encode)
+      MM.DD.YYYY - Band - Full Set.mp4
+      MM.DD.YYYY - Band - Full Set_metadata.json
+    PICS/                         ← Source photos sorted by organize step
+      MM.DD.YYYY - phone 01.jpg
+    CLIPS/                        ← Short source videos (≤ 3 min) from organize step
+    AUDIO/                        ← Source audio files from organize step
+    misc/                         ← Any other files from organize step
 ```
 
-`scan_result.json` now includes a `confirmed` boolean (set by GUI approval) and optionally `skipped: true` (set by GUI skip action).
+`scan_result.json` includes a `confirmed` boolean (set by GUI approval) and optionally `skipped: true` (set by GUI skip action).
+
+`_event_status()` in `gui_server.py` derives pipeline state from workspace contents: checks for `scan_result.json`, `*_segments.json`, and `VIDEOS/*.mp4` to report `scanned`, `analyzed`, `exported`, and `organized`.
 
 ---
 
@@ -225,8 +239,15 @@ To add a camera model: edit `_DEVICE_PATTERNS` in `rename_media.py`.
 
 | File | Purpose |
 |---|---|
-| `.env` | `ANTHROPIC_API_KEY` |
+| `.env` | `ANTHROPIC_API_KEY` + optional `ANTHROPIC_BASE_URL` |
 | `config.json` | Machine config (also editable via ⚙ Settings in GUI) |
 | `credentials.json` | Google OAuth client secrets |
 | `token.json` | Google OAuth token (auto-created on first calendar auth) |
 | `known_bands.json` | Band names cache (auto-populated; also editable in ⚙ Settings) |
+
+`.env` is loaded with `override=True` — it always wins over shell environment. Minimum contents:
+```
+ANTHROPIC_API_KEY=sk-ant-...
+# Add this if your shell routes traffic through a LiteLLM/corp proxy:
+# ANTHROPIC_BASE_URL=https://api.anthropic.com
+```

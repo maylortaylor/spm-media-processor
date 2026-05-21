@@ -39,6 +39,12 @@ Create a `.env` file in the project root:
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+> **Proxy environments** — if your shell routes Anthropic traffic through a LiteLLM or corporate gateway, the GUI will fail with a 401. Add this line to `.env` to force a direct connection:
+> ```
+> ANTHROPIC_BASE_URL=https://api.anthropic.com
+> ```
+> Values in `.env` always override the shell environment.
+
 ### 4. Launch the GUI
 
 **Mac:** double-click `start_gui.command` in Finder, or:
@@ -136,13 +142,16 @@ Bands in the folder name (`04.24 - future vintage, moonshow, mootbooxle`) are al
 
 ## Output files
 
-| File | Format |
-|---|---|
-| Exported clip | `MM.DD.YYYY - Band Name - Full Set.mp4` |
-| YouTube metadata | `MM.DD.YYYY - Band Name - Full Set_metadata.json` |
-| Renamed images | `MM.DD.YYYY - {Event} - phone image 01.jpg` |
-
 All output lands in the workspace: `_processed/{event_folder_name}/` (or `default_output_dir` in settings).
+
+| File / folder | Contents |
+|---|---|
+| `VIDEOS/MM.DD.YYYY - Band - Full Set.mp4` | Exported clip (stream copy, no re-encode) |
+| `VIDEOS/MM.DD.YYYY - Band - Full Set_metadata.json` | YouTube title / description / tags |
+| `PICS/MM.DD.YYYY - phone 01.jpg` | Source photos, sorted by the organize step |
+| `CLIPS/` | Short source videos ≤ 3 min (phone clips, b-roll) |
+| `AUDIO/` | Source audio files |
+| `misc/` | Any other files from the event folder |
 
 ---
 
@@ -210,10 +219,11 @@ source venv/bin/activate
 python process.py scan     "EVENTS/2026/04.24 - Final Friday"
 python process.py analyze  "EVENTS/2026/04.24 - Final Friday"
 python process.py review   "EVENTS/2026/04.24 - Final Friday"
-python process.py export   "EVENTS/2026/04.24 - Final Friday"
+python process.py export   "EVENTS/2026/04.24 - Final Friday"   # clips → VIDEOS/
+python process.py organize "EVENTS/2026/04.24 - Final Friday"   # sort source files into PICS/ CLIPS/ etc.
 python process.py metadata "EVENTS/2026/04.24 - Final Friday"
 
-# Batch (year folder)
+# Batch (year folder) — runs all stages including organize
 python process.py batch "EVENTS/2026/"
 
 # Multi-year archive

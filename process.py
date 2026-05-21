@@ -12,6 +12,8 @@ Usage:
   python process.py batch      <year-folder> [--output-dir D]     Process all event folders in a year dir
   python process.py rename     <folder> [--output-dir D] [--dry-run]
                                                                    Copy-rename images and short clips
+  python process.py organize   <folder> [--output-dir D] [--dry-run]
+                                                                   Assemble PICS/ CLIPS/ VIDEOS/ AUDIO/ misc/
   python process.py deep-batch <root-dir> [--output-dir D] [opts] Process all years under a root dir
   python process.py clean-audio <target> [--output-dir D] [--mode M] [--notch-freq HZ] [--strength N]
                                                                    Remove whine/noise from exported MP4s
@@ -91,6 +93,11 @@ def main() -> None:
     rename_p.add_argument("folder", type=Path)
     _add_output_dir(rename_p)
     rename_p.add_argument("--dry-run", action="store_true", help="Preview renames without copying files")
+
+    organize_p = sub.add_parser("organize", help="Assemble PICS/ CLIPS/ VIDEOS/ AUDIO/ misc/ layout")
+    organize_p.add_argument("folder", type=Path)
+    _add_output_dir(organize_p)
+    organize_p.add_argument("--dry-run", action="store_true", help="Preview organize plan without copying files")
 
     deep_p = sub.add_parser("deep-batch", help="Process all years/events under a root directory")
     deep_p.add_argument(
@@ -208,6 +215,11 @@ def main() -> None:
         from rename_media import run_rename
 
         run_rename(args.folder, output_dir=args.output_dir, dry_run=args.dry_run)
+
+    elif args.command == "organize":
+        from organize import run_organize
+
+        run_organize(args.folder, output_dir=args.output_dir, dry_run=args.dry_run)
 
     elif args.command == "deep-batch":
         from deep_batch import run_deep_batch

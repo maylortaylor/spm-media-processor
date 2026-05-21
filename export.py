@@ -85,7 +85,9 @@ def run_export(folder: Path, output_dir: Path | None = None) -> None:
             print(f"No *_segments.json files in: {workspace}\nRun analyze first.")
         return
 
-    print(f"\nOutput directory: {workspace}")
+    videos_dir = workspace / "VIDEOS"
+    videos_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\nOutput directory: {videos_dir}")
 
     exported = 0
     skipped = 0
@@ -108,7 +110,7 @@ def run_export(folder: Path, output_dir: Path | None = None) -> None:
             label = sanitize_filename(seg.get("label", f"Set {seg['id']}"))
             date_prefix = event_date or "unknown-date"
             clip_name = f"{date_prefix} - {label} - Full Set"
-            output_file = workspace / f"{clip_name}.mp4"
+            output_file = videos_dir / f"{clip_name}.mp4"
 
             if output_file.exists():
                 print(f"  Already exported: {output_file.name}")

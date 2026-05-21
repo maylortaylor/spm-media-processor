@@ -68,6 +68,11 @@ def run_batch(
         # Export
         run_export(folder, output_dir=output_dir)
 
+        # Organize into PICS/ CLIPS/ VIDEOS/ AUDIO/ misc/
+        from organize import run_organize
+
+        run_organize(folder, output_dir=output_dir, skip_confirm=True)
+
     print(f"\n{'=' * 70}")
     print(f"Batch complete. {len(event_folders)} folder(s) processed.")
     if output_dir:

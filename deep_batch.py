@@ -114,6 +114,10 @@ def run_deep_batch(
 
             run_export(folder, output_dir=output_dir)
 
+            from organize import run_organize
+
+            run_organize(folder, output_dir=output_dir, skip_confirm=True)
+
             manifest["years"][year_name]["processed"] += 1
             manifest["years"][year_name]["folders"].append(
                 {"name": folder.name, "status": "processed"},

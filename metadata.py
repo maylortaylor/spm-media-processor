@@ -58,12 +58,13 @@ def run_metadata(folder: Path, output_dir: Path | None = None) -> None:
         with open(scan_file) as f:
             scan_data = json.load(f)
 
-    clips = sorted(workspace.glob("*.mp4"))
+    videos_dir = workspace / "VIDEOS"
+    clips = sorted(videos_dir.glob("*.mp4")) if videos_dir.exists() else []
     if not clips:
-        print("No exported clips found in workspace. Run export first.")
+        print("No exported clips found in VIDEOS/. Run export first.")
         return
 
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    client = anthropic.Anthropic(api_key=(os.environ.get("ANTHROPIC_API_KEY") or "").replace("\n", "").replace("\r", ""))
     event_date = scan_data.get("event_date", "unknown date")
     event_name = scan_data.get("event_name", folder.name)
     notes = scan_data.get("notes", "")
