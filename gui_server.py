@@ -43,8 +43,6 @@ from urllib.parse import unquote
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-
-load_dotenv()
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -61,6 +59,8 @@ from classify import scan_folder
 from analyze import run_analyze
 from export import run_export
 from metadata import run_metadata
+
+load_dotenv()
 
 HERE = Path(__file__).parent
 PORT = 8765
@@ -541,6 +541,7 @@ async def start_scan_all(request: Request):
 
     def _scan_all_job():
         import concurrent.futures
+
         _ready.wait()
         my_job_id = _jid[0]
 

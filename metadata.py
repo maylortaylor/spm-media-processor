@@ -14,9 +14,7 @@ Tags should be relevant to the local St. Pete music scene, the band genre, and l
 Return only valid JSON — no markdown, no explanation."""
 
 
-def generate_metadata(
-    band_name: str, event_name: str, event_date: str, notes: str, client: _genai.Client
-) -> dict:
+def generate_metadata(band_name: str, event_name: str, event_date: str, notes: str, client: _genai.Client) -> dict:
     prompt = f"""Generate YouTube metadata for this live music clip:
 
 Band: {band_name}
