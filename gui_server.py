@@ -41,6 +41,7 @@ from typing import Any, Generator
 from urllib.parse import unquote
 
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -58,6 +59,8 @@ from classify import scan_folder
 from analyze import run_analyze
 from export import run_export
 from metadata import run_metadata
+
+load_dotenv()
 
 HERE = Path(__file__).parent
 PORT = 8765
@@ -103,6 +106,9 @@ class _Job:
 
     async def stream(self) -> Generator[str, None, None]:
         self._loop = asyncio.get_running_loop()
+        # If job finished before SSE connected, inject sentinel so we don't hang
+        if self._done.is_set():
+            self._queue.put_nowait(None)
         # Replay lines buffered before SSE connected
         for line in self.lines:
             yield _sse_line(line)
@@ -129,10 +135,15 @@ class _CapturingWriter(io.TextIOBase):
         self._buf = ""
 
     def write(self, s: str) -> int:
+        try:
+            self._original.write(s)
+            self._original.flush()
+        except Exception:
+            pass
         self._buf += s
         while "\n" in self._buf:
             line, self._buf = self._buf.split("\n", 1)
-            self._job._push(line)
+            self._job._push(line.rstrip("\r"))
         return len(s)
 
     def flush(self) -> None:
@@ -234,8 +245,8 @@ async def get_config():
     cfg = load_config()
     # Warn about missing env vars
     warnings = []
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        warnings.append("ANTHROPIC_API_KEY is not set — Claude features will fail")
+    if not os.environ.get("GEMINI_API_KEY"):
+        warnings.append("GEMINI_API_KEY is not set — scan and metadata features will fail")
     cfg["_warnings"] = warnings
     return cfg
 
@@ -339,7 +350,7 @@ async def discover(request: Request):
 
     events = []
     for d in sorted(year_folder.iterdir()):
-        if not d.is_dir() or d.name.startswith("."):
+        if not d.is_dir() or d.name.startswith(".") or d.name.startswith("_"):
             continue
         workspace = get_workspace(d, output_dir)
         scan_file = workspace / "scan_result.json"
@@ -428,7 +439,7 @@ async def patch_workspace_scan(request: Request):
     with open(scan_file) as f:
         data = json.load(f)
 
-    for field in ("event_name", "bands", "notes", "confirmed"):
+    for field in ("event_name", "bands", "notes", "confirmed", "skipped"):
         if field in body:
             data[field] = body[field]
 
@@ -521,10 +532,18 @@ async def start_scan_all(request: Request):
 
     # Only scan folders that don't have a scan_result yet, or force=True
     force = body.get("force", False)
-    event_folders = [d for d in sorted(year_folder.iterdir()) if d.is_dir() and not d.name.startswith(".")]
+    event_folders = [d for d in sorted(year_folder.iterdir()) if d.is_dir() and not d.name.startswith((".", "_"))]
+
+    # Use a threading.Event + list so the job thread can safely read the job_id
+    # without racing against the assignment on the next line after jobs.submit().
+    _jid: list[str] = []
+    _ready = threading.Event()
 
     def _scan_all_job():
         import concurrent.futures
+
+        _ready.wait()
+        my_job_id = _jid[0]
 
         pending = []
         for d in event_folders:
@@ -536,7 +555,7 @@ async def start_scan_all(request: Request):
                 # Already scanned — emit a folder_done event from cached data
                 with open(scan_file) as f:
                     existing = json.load(f)
-                jobs.get(_scan_all_job._job_id).push_event(
+                jobs.get(my_job_id).push_event(
                     {
                         "type": "folder_done",
                         "folder": d.name,
@@ -559,7 +578,7 @@ async def start_scan_all(request: Request):
                 print(f"\n[{d.name}] Starting scan...")
                 result = scan_folder(d, output_dir)
                 done_count += 1
-                jobs.get(_scan_all_job._job_id).push_event(
+                jobs.get(my_job_id).push_event(
                     {
                         "type": "folder_done",
                         "folder": d.name,
@@ -568,11 +587,21 @@ async def start_scan_all(request: Request):
                         "cached": False,
                     }
                 )
-                jobs.get(_scan_all_job._job_id).push_event(
+                jobs.get(my_job_id).push_event(
                     {
                         "type": "progress",
                         "done": done_count,
                         "total": total,
+                    }
+                )
+            except Exception as exc:
+                print(f"\n[{d.name}] Scan failed: {exc}")
+                jobs.get(my_job_id).push_event(
+                    {
+                        "type": "folder_error",
+                        "folder": d.name,
+                        "folder_path": str(d),
+                        "error": str(exc),
                     }
                 )
             finally:
@@ -586,8 +615,8 @@ async def start_scan_all(request: Request):
         return {"scanned": len(pending), "cached": len(event_folders) - len(pending)}
 
     job_id = jobs.submit(_scan_all_job)
-    # Attach job_id so the nested function can reference it
-    _scan_all_job._job_id = job_id
+    _jid.append(job_id)
+    _ready.set()
     return {"job_id": job_id}
 
 
@@ -756,7 +785,15 @@ async def stream_job(job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    return StreamingResponse(job.stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        job.stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -936,8 +973,8 @@ async def review_save(request: Request):
 
 
 def _check_env() -> None:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("WARNING: ANTHROPIC_API_KEY is not set — scan and metadata will fail")
+    if not os.environ.get("GEMINI_API_KEY"):
+        print("WARNING: GEMINI_API_KEY is not set — scan and metadata will fail")
     cfg = load_config()
     ffmpeg = cfg.get("ffmpeg_path", "ffmpeg")
     try:

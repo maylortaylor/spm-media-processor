@@ -171,6 +171,7 @@ async function loadYearFolder() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function deriveUiState(event) {
+  if (event.scanError) return 'error';
   if (!event.scan_result) return 'scanning';
   const sr = event.scan_result;
   if (sr.skipped) return 'skipped';
@@ -310,7 +311,12 @@ function renderCard(event) {
     (moreFiles > 0 ? `<div class="file-row" style="color:#555;font-style:italic">  + ${moreFiles} more file(s)</div>` : '');
 
   const scanningHtml = uiState === 'scanning'
-    ? '<div class="scanning-pulse text-muted" style="font-size:0.82rem;padding:4px 0">Scanning with Claude…</div>'
+    ? '<div class="scanning-pulse text-muted" style="font-size:0.82rem;padding:4px 0">Scanning with Gemini…</div>'
+    : uiState === 'error'
+    ? `<div class="scan-error" style="font-size:0.82rem;padding:4px 0;color:var(--red)">
+         <strong>Scan failed:</strong> ${escHtml((event.scanError || 'unknown error').split('\n')[0])}
+         <button class="btn btn-sm" style="margin-left:8px" data-action="rescan" data-folder="${fp}">Retry</button>
+       </div>`
     : '';
 
   // Prominent review call-to-action
@@ -373,6 +379,7 @@ function renderCard(event) {
 
     <div class="card-footer">
       ${uiState !== 'skipped' ? `<button class="btn btn-xs btn-danger" data-action="skip" data-folder="${fp}">Skip</button>` : `<button class="btn btn-xs" data-action="unskip" data-folder="${fp}">Unskip</button>`}
+      ${uiState === 'skipped' && sr && !st.analyzed ? `<button class="btn btn-xs btn-primary" data-action="analyze" data-folder="${fp}">Analyze</button>` : ''}
       ${sr ? `<button class="btn btn-xs" data-action="rescan" data-folder="${fp}">Re-scan</button>` : ''}
       ${st.exported ? `<button class="btn btn-xs" data-action="metadata" data-folder="${fp}">Generate Metadata</button>` : ''}
       <span style="flex:1"></span>
@@ -441,6 +448,11 @@ function bindCardEvents() {
   // Re-scan
   document.querySelectorAll('[data-action="rescan"]').forEach(btn => {
     btn.addEventListener('click', () => rescanEvent(btn.dataset.folder));
+  });
+
+  // Analyze (per-card, for skipped events)
+  document.querySelectorAll('[data-action="analyze"]').forEach(btn => {
+    btn.addEventListener('click', () => runStage(btn.dataset.folder, 'analyze'));
   });
 
   // Generate metadata
@@ -540,6 +552,7 @@ async function rescanEvent(folder) {
   if (!ev) return;
   ev.uiState = 'scanning';
   ev.scan_result = null;
+  ev.scanError = null;
   refreshCard(folder);
 
   const { job_id } = await POST('/api/scan', { folder, output_dir: state.outputDir || null });
@@ -549,10 +562,19 @@ async function rescanEvent(folder) {
   streamJob(job_id, {
     onLog: (line) => { if (logEl) appendLog(logEl, line); },
     onDone: async () => {
-      const ws = await GET(`/api/workspace?folder=${encodeURIComponent(folder)}`);
-      ev.scan_result = ws.scan_result;
-      ev.status = ws.status;
-      ev.uiState = deriveUiState(ev);
+      const [ws, jobStatus] = await Promise.all([
+        GET(`/api/workspace?folder=${encodeURIComponent(folder)}`),
+        GET(`/api/job/${job_id}`),
+      ]);
+      if (jobStatus.error) {
+        ev.scanError = jobStatus.error;
+        ev.uiState = 'error';
+      } else {
+        ev.scan_result = ws.scan_result;
+        ev.status = ws.status;
+        ev.scanError = null;
+        ev.uiState = deriveUiState(ev);
+      }
       refreshCard(folder);
       updateDashSummary();
     },
@@ -742,21 +764,74 @@ async function startScanAll(force = false) {
     output_dir: state.outputDir || null,
     force,
   });
+  console.log('[scanAll] job started:', job_id);
 
+  const batchLog = document.getElementById('batch-log');
+  if (batchLog) batchLog.style.display = 'block';
   streamJob(job_id, {
-    onLog: (line) => console.log('[scan-all]', line),
+    onLog: (line) => { if (batchLog) appendLog(batchLog, line); },
     onEvent: (ev) => {
       if (ev.type === 'folder_done') {
+        console.log('[scanAll] folder_done:', ev.folder, 'has scan_result:', !!ev.scan_result);
         const event = state.events.find(e => e.folder_name === ev.folder || e.folder === ev.folder_path);
         if (event) {
           event.scan_result = ev.scan_result;
+          event.scanError = null;
           event.uiState = deriveUiState(event);
+          refreshCard(event.folder);
+        } else {
+          console.warn('[scanAll] no match for folder:', ev.folder, '| folder_path:', ev.folder_path);
+        }
+        updateDashSummary();
+      } else if (ev.type === 'folder_error') {
+        console.warn('[scanAll] folder_error:', ev.folder, ev.error);
+        const event = state.events.find(e => e.folder_name === ev.folder || e.folder === ev.folder_path);
+        if (event) {
+          event.scanError = ev.error;
+          event.uiState = 'error';
           refreshCard(event.folder);
         }
         updateDashSummary();
       }
     },
-    onDone: () => updateDashSummary(),
+    onDone: async () => {
+      console.log('[scanAll] onDone fired');
+      // Check if the overall batch job itself errored (e.g. setup failure)
+      try {
+        const jobStatus = await GET(`/api/job/${job_id}`);
+        if (jobStatus.error) {
+          state.events.filter(e => e.uiState === 'scanning').forEach(ev => {
+            ev.scanError = `Batch scan failed: ${jobStatus.error}`;
+            ev.uiState = 'error';
+            refreshCard(ev.folder);
+          });
+          updateDashSummary();
+          return;
+        }
+      } catch { /* continue with safety net even if status fetch fails */ }
+      updateDashSummary();
+      // Safety net: if any cards never received a folder_done event, re-fetch
+      // their workspace state directly so they don't stay stuck at "scanning".
+      const stillScanning = state.events.filter(e => !e.scan_result && e.uiState !== 'error');
+      console.log('[scanAll] still scanning after done:', stillScanning.length);
+      await Promise.all(stillScanning.map(async (ev) => {
+        try {
+          const ws = await GET(`/api/workspace?folder=${encodeURIComponent(ev.folder)}`);
+          if (ws.scan_result) {
+            ev.scan_result = ws.scan_result;
+            ev.status = ws.status;
+            ev.scanError = null;
+            ev.uiState = deriveUiState(ev);
+            refreshCard(ev.folder);
+          } else {
+            ev.scanError = 'Scan did not produce a result — check API key and logs.';
+            ev.uiState = 'error';
+            refreshCard(ev.folder);
+          }
+        } catch { /* ignore per-event errors */ }
+      }));
+      updateDashSummary();
+    },
   });
 }
 
@@ -770,8 +845,10 @@ async function runBatchJob(title, endpoint, folders, extra = {}) {
   state.batchJobId = job_id;
   openBatchProgress(title, folders);
 
+  const batchLog = document.getElementById('batch-log');
+  if (batchLog) { batchLog.style.display = 'block'; batchLog.innerHTML = ''; }
   streamJob(job_id, {
-    onLog: (line) => console.log(`[${endpoint}]`, line),
+    onLog: (line) => { if (batchLog) appendLog(batchLog, line); },
     onEvent: async (ev) => {
       if (ev.type === 'folder_done') {
         updateBatchItem(ev.folder, 'done');
@@ -835,6 +912,7 @@ async function openSettings() {
   document.getElementById('cfg-single-band').value = cfg.single_band_threshold_min ?? 75;
   document.getElementById('cfg-min-seg').value = cfg.min_segment_min ?? 5;
   document.getElementById('cfg-calendar').value = cfg.google_calendar_id || '';
+  document.getElementById('cfg-scan-use-ai').checked = cfg.scan_use_ai !== false;
 
   const bands = await loadBands();
   renderSettingsBands(bands);
@@ -869,6 +947,7 @@ async function saveSettings() {
     single_band_threshold_min: parseFloat(document.getElementById('cfg-single-band').value),
     min_segment_min: parseFloat(document.getElementById('cfg-min-seg').value),
     google_calendar_id: document.getElementById('cfg-calendar').value.trim(),
+    scan_use_ai: document.getElementById('cfg-scan-use-ai').checked,
   };
   await POST('/api/config', cfg);
   document.getElementById('settings-overlay').classList.remove('open');

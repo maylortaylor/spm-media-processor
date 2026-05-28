@@ -5,7 +5,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-import anthropic
+from google import genai as _genai
 
 from config import load_config, get_workspace
 from calendar_client import get_events_on_date
@@ -52,6 +52,34 @@ def format_date(d: date) -> str:
     return f"{d.month:02d}.{d.day:02d}.{d.year}"
 
 
+def _heuristic_classify(folder_name: str, event_date, calendar_events: list) -> dict:
+    """Extract event name and bands from folder name without AI."""
+    rest = re.sub(r"^\d{1,2}\.\d{1,2}(?:\.\d{4})?\s*", "", folder_name).strip()
+    rest = re.sub(r"^[\s\-=—]+", "", rest).strip()
+
+    notes = ""
+    paren_match = re.search(r"\(([^)]+)\)", rest)
+    if paren_match:
+        notes = paren_match.group(1).strip()
+        rest = re.sub(r"\s*\([^)]+\)", "", rest).strip()
+
+    bands = [b.strip() for b in rest.split(",") if b.strip()]
+
+    if calendar_events:
+        event_name = calendar_events[0].get("summary", folder_name)
+    elif bands:
+        event_name = bands[0]
+    else:
+        event_name = folder_name
+
+    return {
+        "event_date": format_date(event_date) if event_date else None,
+        "event_name": event_name,
+        "bands": bands,
+        "notes": notes,
+    }
+
+
 def scan_folder(folder: Path, output_dir: Path | None = None) -> dict:
     config = load_config()
     folder = folder.resolve()
@@ -94,22 +122,27 @@ def scan_folder(folder: Path, output_dir: Path | None = None) -> dict:
         else:
             print("  No calendar events found")
 
-    # Claude classification
+    # Classification — AI or heuristic
     video_files = [f for f in files if f["type"] == "video"]
-    print(f"Asking Claude to classify {len(video_files)} video file(s)...")
 
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    use_ai = config.get("scan_use_ai", True)
+    claude_data = None
 
-    file_list_text = "\n".join(f"  {f['relative_path']} ({f['size_gb']} GB)" for f in video_files) or "  (none)"
+    if use_ai:
+        print(f"Asking Gemini to classify {len(video_files)} video file(s)...")
+        try:
+            client = _genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-    cal_text = "Not found"
-    if calendar_events:
-        cal_text = "\n".join(
-            f"  - {e['summary']}: {e['description'][:200] if e['description'] else '(no description)'}"
-            for e in calendar_events
-        )
+            file_list_text = "\n".join(f"  {f['relative_path']} ({f['size_gb']} GB)" for f in video_files) or "  (none)"
 
-    prompt = f"""Analyze this folder of live music event recordings.
+            cal_text = "Not found"
+            if calendar_events:
+                cal_text = "\n".join(
+                    f"  - {e['summary']}: {e['description'][:200] if e['description'] else '(no description)'}"
+                    for e in calendar_events
+                )
+
+            prompt = f"""Analyze this folder of live music event recordings.
 
 Folder name: {folder_name}
 Parsed date: {format_date(event_date) if event_date else "unknown"}
@@ -127,21 +160,28 @@ Return a JSON object (no markdown, no explanation) with:
 
 Example: {{"event_date":"03.15.2024","event_name":"Final Friday","bands":["Band A","Band B"],"notes":"Monthly showcase at Suite E."}}"""
 
-    message = client.messages.create(
-        model=config.get("claude_model", "claude-sonnet-4-6"),
-        max_tokens=512,
-        messages=[{"role": "user", "content": prompt}],
-    )
+            response = client.models.generate_content(
+                model=config.get("gemini_model", "gemini-2.0-flash"),
+                contents=prompt,
+            )
 
-    try:
-        claude_data = json.loads(message.content[0].text.strip())
-    except (json.JSONDecodeError, IndexError):
-        claude_data = {
-            "event_date": format_date(event_date) if event_date else None,
-            "event_name": folder_name,
-            "bands": [],
-            "notes": "",
-        }
+            try:
+                claude_data = json.loads(response.text.strip())
+            except (json.JSONDecodeError, AttributeError):
+                claude_data = None
+
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                print("  Gemini quota exceeded — falling back to heuristic classification")
+            else:
+                print(f"  Gemini error — falling back to heuristic classification: {e}")
+            claude_data = None
+
+    if claude_data is None:
+        if not use_ai:
+            print("Using heuristic classification (AI disabled)")
+        claude_data = _heuristic_classify(folder_name, event_date, calendar_events)
 
     result = {
         "folder": str(folder),

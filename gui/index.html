@@ -148,6 +148,17 @@
     </div>
 
     <div>
+      <h3>AI</h3>
+      <div class="settings-field">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="cfg-scan-use-ai">
+          Use AI (Gemini) for scan
+        </label>
+        <small style="color:var(--text-muted);display:block;margin-top:4px;">Uncheck to parse folder names without AI — no quota used</small>
+      </div>
+    </div>
+
+    <div>
       <h3>Known Bands</h3>
       <div class="band-manager">
         <div class="band-manager-list" id="settings-bands-list"></div>
@@ -174,12 +185,13 @@
     <div class="batch-progress-fill" id="batch-fill" style="width:0%"></div>
   </div>
   <div class="batch-folder-list" id="batch-folder-list"></div>
+  <div class="log-panel" id="batch-log" style="max-height:160px;overflow-y:auto;display:none"></div>
 </div>
 
 <!-- Shared datalist for band autocomplete -->
 <datalist id="bands-datalist"></datalist>
 <datalist id="bands-datalist-settings"></datalist>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=2"></script>
 </body>
 </html>
