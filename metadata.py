@@ -2,7 +2,8 @@ import json
 import os
 from pathlib import Path
 
-import anthropic
+from google import genai as _genai
+from google.genai import types as _types
 
 from config import load_config, get_workspace
 
@@ -14,7 +15,7 @@ Return only valid JSON — no markdown, no explanation."""
 
 
 def generate_metadata(
-    band_name: str, event_name: str, event_date: str, notes: str, client: anthropic.Anthropic
+    band_name: str, event_name: str, event_date: str, notes: str, client: _genai.Client
 ) -> dict:
     prompt = f"""Generate YouTube metadata for this live music clip:
 
@@ -30,16 +31,18 @@ Return a JSON object with:
 - "thumbnail_time": suggested timestamp for thumbnail (HH:MM:SS format, a good mid-performance moment)"""
 
     config = load_config()
-    message = client.messages.create(
-        model=config.get("claude_model", "claude-sonnet-4-6"),
-        max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}],
+    response = client.models.generate_content(
+        model=config.get("gemini_model", "gemini-2.0-flash"),
+        contents=prompt,
+        config=_types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            max_output_tokens=1024,
+        ),
     )
 
     try:
-        return json.loads(message.content[0].text.strip())
-    except (json.JSONDecodeError, IndexError):
+        return json.loads(response.text.strip())
+    except (json.JSONDecodeError, AttributeError):
         return {
             "title": f"{band_name} | Live at Suite E Studios",
             "description": f"{band_name} performing live at Suite E Studios in St. Pete, FL on {event_date}.",
@@ -63,7 +66,7 @@ def run_metadata(folder: Path, output_dir: Path | None = None) -> None:
         print("No exported clips found in workspace. Run export first.")
         return
 
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    client = _genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     event_date = scan_data.get("event_date", "unknown date")
     event_name = scan_data.get("event_name", folder.name)
     notes = scan_data.get("notes", "")
