@@ -379,6 +379,7 @@ function renderCard(event) {
 
     <div class="card-footer">
       ${uiState !== 'skipped' ? `<button class="btn btn-xs btn-danger" data-action="skip" data-folder="${fp}">Skip</button>` : `<button class="btn btn-xs" data-action="unskip" data-folder="${fp}">Unskip</button>`}
+      ${uiState === 'skipped' && sr && !st.analyzed ? `<button class="btn btn-xs btn-primary" data-action="analyze" data-folder="${fp}">Analyze</button>` : ''}
       ${sr ? `<button class="btn btn-xs" data-action="rescan" data-folder="${fp}">Re-scan</button>` : ''}
       ${st.exported ? `<button class="btn btn-xs" data-action="metadata" data-folder="${fp}">Generate Metadata</button>` : ''}
       <span style="flex:1"></span>
@@ -447,6 +448,11 @@ function bindCardEvents() {
   // Re-scan
   document.querySelectorAll('[data-action="rescan"]').forEach(btn => {
     btn.addEventListener('click', () => rescanEvent(btn.dataset.folder));
+  });
+
+  // Analyze (per-card, for skipped events)
+  document.querySelectorAll('[data-action="analyze"]').forEach(btn => {
+    btn.addEventListener('click', () => runStage(btn.dataset.folder, 'analyze'));
   });
 
   // Generate metadata

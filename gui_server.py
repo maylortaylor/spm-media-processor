@@ -439,7 +439,7 @@ async def patch_workspace_scan(request: Request):
     with open(scan_file) as f:
         data = json.load(f)
 
-    for field in ("event_name", "bands", "notes", "confirmed"):
+    for field in ("event_name", "bands", "notes", "confirmed", "skipped"):
         if field in body:
             data[field] = body[field]
 
