@@ -11,7 +11,7 @@ DEFAULTS = {
     "google_calendar_id": "",
     "default_output_dir": None,
     "claude_model": "claude-sonnet-4-6",
-    "gemini_model": "gemini-2.0-flash",
+    "gemini_model": "gemini-flash-latest",
     "single_band_threshold_min": 75,
     "gap_db": 12.0,
     "gap_sec": 30.0,

@@ -30,7 +30,7 @@ Return a JSON object with:
 
     config = load_config()
     response = client.models.generate_content(
-        model=config.get("gemini_model", "gemini-2.0-flash"),
+        model=config.get("gemini_model", "gemini-flash-latest"),
         contents=prompt,
         config=_types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,

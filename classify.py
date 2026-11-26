@@ -177,7 +177,7 @@ Return a JSON object (no markdown, no explanation) with:
 Example: {{"event_date":"03.15.2024","event_name":"Final Friday","bands":["Band A","Band B"],"notes":"Monthly showcase at Suite E."}}"""
 
             response = _generate_with_backoff(
-                client, config.get("gemini_model", "gemini-2.0-flash"), prompt
+                client, config.get("gemini_model", "gemini-flash-latest"), prompt
             )
 
             try:

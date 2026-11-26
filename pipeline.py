@@ -31,7 +31,7 @@ SCOPE_FILE = Path(__file__).with_name("pipeline_scope.json")
 
 def load_scope(path: Path = SCOPE_FILE) -> dict:
     data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    return {"exclude": data.get("exclude", []), "min_video_mb": data.get("min_video_mb", 50)}
+    return {"exclude": data.get("exclude", []), "min_video_mb": data.get("min_video_mb", 2048)}  # analyze only treats 2 GB+ files as sets
 
 
 def is_excluded(name: str, patterns: list[str]) -> bool:
@@ -77,7 +77,7 @@ def plan(root: Path, scope: dict, processed_dir: Path | None = None) -> list[dic
         if is_excluded(folder.name, scope["exclude"]):
             row["reason"] = "excluded by pipeline_scope.json"
         elif largest_video_mb(folder) < scope["min_video_mb"]:
-            row["reason"] = f"no video over {scope['min_video_mb']} MB"
+            row["reason"] = f"clips only, no video over {scope['min_video_mb'] // 1024} GB (Phase 2)"
         elif not scanned:
             row["action"] = "scan+analyze"
         elif unanalyzed_videos(ws):
