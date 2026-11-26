@@ -31,6 +31,12 @@ DEFAULTS = {
     "publish_bumper_logo_opacity": 0.62,
     "publish_overlay_fade_sec": 1.25,  # text fade in / fade out
     "publish_overlay_hold_sec": 7.5,  # text fully visible, at the start and again before the end
+    # Opening card: the set's audio plays from 0:00 under the title card (blurred footage + logo + band,
+    # date, event, venue), which holds for publish_intro_hold_sec and then dissolves into the clear video
+    # over publish_intro_fade_sec. Set publish_intro_fade_sec to 0 for the old short bumper.
+    "publish_intro_fade_sec": 15,
+    "publish_intro_hold_sec": 3,
+    "publish_intro_show_date": True,
     "publish_overlay_font": None,  # null = Roboto SemiCondensed Light (same as OBS)
     "publish_overlay_logo": "auto",  # auto = add SUITE E logo only when the source isn't an OBS recording
     "publish_logo": None,  # null = {publish_dir}/_assets/logo.png

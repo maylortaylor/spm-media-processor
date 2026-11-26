@@ -296,10 +296,19 @@ def plan_event(folder: Path, output_dir: Path | None = None, config: dict | None
             if problem:
                 state = problem.split(":")[0]
             elif output.exists():
-                stale = entry and (abs(entry["start"] - item["start"]) > 0.5 or abs(entry["end"] - item["end"]) > 0.5)
+                trim_changed = entry and (
+                    abs(entry["start"] - item["start"]) > 0.5 or abs(entry["end"] - item["end"]) > 0.5
+                )
+                intro_changed = (
+                    entry
+                    and kind == "video"
+                    and float(entry.get("intro_fade", 0)) != float(config.get("publish_intro_fade_sec", 0))
+                )
+                stale = trim_changed or intro_changed
                 state = "stale" if stale else "published"
                 if stale:
-                    problem = "stale: trim changed since publish — delete the output file to re-render"
+                    why = "trim changed" if trim_changed else "intro settings changed"
+                    problem = f"stale: {why} since publish — delete the output file to re-render"
 
             rows.append(
                 {
@@ -568,6 +577,7 @@ def render_overlay(
     config: dict,
     top_label: str | None = None,
     bumper: bool = False,
+    date_text: str | None = None,
 ) -> Path:
     """Transparent overlay: '{top} at / Suite E Studios' top-right, label + URL bottom-center, logo bottom-left.
 
@@ -585,7 +595,9 @@ def render_overlay(
         _light_text(img, (1870 * s, 64 * s), f"{top_label} at", int(64 * s), 1000 * s, "ra", 0.72, config)
         _light_text(img, (1870 * s, 140 * s), venue, int(64 * s), 1000 * s, "ra", 0.72, config)
     if bumper:  # logo sits mid-screen, so: name under it, URL at the very bottom
-        _light_text(img, (960 * s, 880 * s), label, int(100 * s), 1500 * s, "mm", 0.88, config)
+        _light_text(img, (960 * s, 860 * s if date_text else 880 * s), label, int(100 * s), 1500 * s, "mm", 0.88, config)
+        if date_text:
+            _light_text(img, (960 * s, 950 * s), date_text, int(58 * s), 1500 * s, "mm", 0.8, config)
         _light_text(img, (960 * s, 1032 * s), url, int(54 * s), 1500 * s, "mm", 0.72, config)
     else:
         _light_text(img, (960 * s, 838 * s), label, int(100 * s), 1500 * s, "mm", 0.86, config)
@@ -839,7 +851,13 @@ def _render_video_bumper(row: dict, config: dict, info: dict, W: int, H: int, fp
     lead = float(config.get("publish_bumper_lead_sec", 1.5))  # blur + logo alone before the text appears
     join_fade = 0.4  # dip through black where two recordings meet
     text_span = 2 * fade + hold
-    intro = round(lead + text_span + 0.5 + xf, 3)  # blur → text in/hold/out → crossfade to clean
+    intro_fade = float(config.get("publish_intro_fade_sec", 0))
+    intro_hold = float(config.get("publish_intro_hold_sec", 3))
+    card_intro = intro_fade > 0  # opening title card that dissolves over intro_fade seconds
+    if card_intro:
+        intro = round(intro_hold + intro_fade, 3)  # card holds, then everything dissolves together
+    else:
+        intro = round(lead + text_span + 0.5 + xf, 3)  # blur → text in/hold/out → crossfade to clean
     outro = round(xf + lead + text_span, 3)  # crossfade to blur → text in/hold/out to the end
     first_len = ranges[0][2] - ranges[0][1]
     last_len = ranges[-1][2] - ranges[-1][1]
@@ -850,8 +868,11 @@ def _render_video_bumper(row: dict, config: dict, info: dict, W: int, H: int, fp
     publish_dir = Path(config["_publish_dir"])
     cards = publish_dir / "_assets" / "cards"
     top, bottom = title_lines(row)
-    tag = _sanitize(f"{row['event_date']} {row['label']} {row.get('title_mode', 'band')} {W}x{H}")
-    text_png = render_overlay(bottom, W, H, False, cards / f"{tag} text.png", config, top_label=top, bumper=True)
+    date_text = _pretty_date(row["event_date"]) if card_intro and config.get("publish_intro_show_date", True) else None
+    tag = _sanitize(f"{row['event_date']} {row['label']} {row.get('title_mode', 'band')} {W}x{H} d{int(bool(date_text))}")
+    text_png = render_overlay(
+        bottom, W, H, False, cards / f"{tag} text.png", config, top_label=top, bumper=True, date_text=date_text
+    )
     logo_png = render_bumper_logo(W, H, cards / f"bumper logo {W}x{H}.png", config)
 
     fit = f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=black"
@@ -860,27 +881,44 @@ def _render_video_bumper(row: dict, config: dict, info: dict, W: int, H: int, fp
     blur = f"boxblur={max(2, int(float(config.get('publish_bumper_blur', 12)) * s))}:3,eq=brightness=-0.04:saturation=1.15"
 
     def bumper_clip(source: Path, start: float, length: float, kind: str, out: Path) -> None:
-        if kind == "intro":
-            crossfade = f"fade=t=out:st={length - xf}:d={xf}:alpha=1"
-            text_at, edge = round(lead, 3), "fade=t=in:st=0:d=1"
+        if kind == "intro" and card_intro:
+            # Title card is on screen from the first frame (audio plays under it); card, logo and text
+            # all hold for intro_hold seconds, then dissolve together into the clear video over intro_fade.
+            ramp = f"fade=t=out:st={intro_hold}:d={intro_fade}:alpha=1"
+            graph = ";".join(
+                [
+                    f"[0:v]{base},split=2[c][b]",
+                    f"[b]{blur}[bb]",
+                    f"[bb][1:v]overlay=0:0:shortest=1,format=yuva420p,{ramp}[ba]",
+                    "[c][ba]overlay=0:0[x]",
+                    f"[2:v]format=rgba,fade=t=in:st=0:d=0.4:alpha=1,{ramp}[t]",
+                    "[x][t]overlay=0:0:eof_action=pass,format=yuv420p[v]",
+                ]
+            )
+            text_len = length
         else:
-            crossfade = f"fade=t=in:st=0:d={xf}:alpha=1"
-            text_at, edge = round(xf + lead, 3), f"fade=t=out:st={length - 1.5}:d=1.5"
-        shift = f",setpts=PTS+{text_at}/TB" if text_at else ""
-        graph = ";".join(
-            [
-                f"[0:v]{base},split=2[c][b]",
-                f"[b]{blur}[bb]",
-                "[bb][1:v]overlay=0:0:shortest=1,format=yuva420p," + crossfade + "[ba]",
-                "[c][ba]overlay=0:0[x]",
-                f"[2:v]format=rgba,fade=t=in:st=0:d={fade}:alpha=1,"
-                f"fade=t=out:st={text_span - fade}:d={fade}:alpha=1{shift}[t]",
-                f"[x][t]overlay=0:0:eof_action=pass,{edge},format=yuv420p[v]",
-            ]
-        )
+            if kind == "intro":
+                crossfade = f"fade=t=out:st={length - xf}:d={xf}:alpha=1"
+                text_at, edge = round(lead, 3), "fade=t=in:st=0:d=1"
+            else:
+                crossfade = f"fade=t=in:st=0:d={xf}:alpha=1"
+                text_at, edge = round(xf + lead, 3), f"fade=t=out:st={length - 1.5}:d=1.5"
+            shift = f",setpts=PTS+{text_at}/TB" if text_at else ""
+            graph = ";".join(
+                [
+                    f"[0:v]{base},split=2[c][b]",
+                    f"[b]{blur}[bb]",
+                    "[bb][1:v]overlay=0:0:shortest=1,format=yuva420p," + crossfade + "[ba]",
+                    "[c][ba]overlay=0:0[x]",
+                    f"[2:v]format=rgba,fade=t=in:st=0:d={fade}:alpha=1,"
+                    f"fade=t=out:st={text_span - fade}:d={fade}:alpha=1{shift}[t]",
+                    f"[x][t]overlay=0:0:eof_action=pass,{edge},format=yuv420p[v]",
+                ]
+            )
+            text_len = text_span
         args = ["-ss", str(start), "-t", str(length), "-i", str(source)]
         args += ["-loop", "1", "-framerate", str(fps), "-t", str(length), "-i", str(logo_png)]
-        args += ["-loop", "1", "-framerate", str(fps), "-t", str(text_span), "-i", str(text_png)]
+        args += ["-loop", "1", "-framerate", str(fps), "-t", str(text_len), "-i", str(text_png)]
         args += ["-filter_complex", graph, "-map", "[v]", "-an"] + venc
         _run_ffmpeg(args, length, out, config)
 
@@ -930,7 +968,9 @@ def _render_video_bumper(row: dict, config: dict, info: dict, W: int, H: int, fp
             if i < last:
                 joins.append(f"afade=t=out:st={max(length - join_fade, 0)}:d={join_fade}")
             chains.append(f"[{i}:a]{','.join([aformat] + joins)}[a{i}]")
-        ends = f"afade=t=in:st=0:d=1,afade=t=out:st={max(dur - 2, 0)}:d=2"
+        # With the opening card, audio starts at full level at 0:00 (no fade-in); the outro still fades out.
+        lead_in = "" if card_intro else "afade=t=in:st=0:d=1,"
+        ends = f"{lead_in}afade=t=out:st={max(dur - 2, 0)}:d=2"
         concat = "".join(f"[a{i}]" for i in range(len(ranges))) + f"concat=n={len(ranges)}:v=0:a=1,{ends}[a]"
         a_args += ["-filter_complex", ";".join(chains + [concat]), "-map", "[a]", "-c:a", "aac", "-b:a", "256k"]
         _run_ffmpeg(a_args, dur, audio, config)
@@ -1130,6 +1170,8 @@ def run_publish(
                 "source": str(row["source"]),
                 "start": row["start"],
                 "end": row["end"],
+                "intro_fade": float(config.get("publish_intro_fade_sec", 0)),
+                "upload_approved": False,  # a person flips this after watching the render (approve-upload)
                 "rendered_at": datetime.now().isoformat(timespec="seconds"),
             }
             _save_manifest(publish_dir, manifest)
