@@ -174,6 +174,11 @@ def main() -> None:
     new_p.add_argument("--dry-run", action="store_true", help="List what would run, change nothing")
     new_p.add_argument("--limit", type=int, default=None, help="Only process the first N (smallest) folders")
 
+    gate_p = sub.add_parser("approve-upload", help="Human gate: review rendered videos and approve them for upload")
+    gate_p.add_argument("year_folder", type=Path)
+    gate_p.add_argument("action", choices=["list", "sheet", "approve", "revoke", "export-queue"])
+    gate_p.add_argument("names", nargs="*", help="Part of the output file name (e.g. the band)")
+
     apply_p = sub.add_parser("apply-info", help="Apply a filled-in band_info.csv")
     apply_p.add_argument("sheet", type=Path, nargs="?", default=None)
 
@@ -297,6 +302,11 @@ def main() -> None:
         from inventory import run_inventory
 
         run_inventory(args.year_folder, output_dir=args.output_dir)
+
+    elif args.command == "approve-upload":
+        from upload_gate import run_gate
+
+        run_gate(args.year_folder, args.action, args.names)
 
     elif args.command == "scan-new":
         from pipeline import run_scan_new
