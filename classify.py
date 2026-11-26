@@ -88,7 +88,8 @@ def _generate_with_backoff(client, model: str, prompt: str, tries: int = 4, base
         try:
             return client.models.generate_content(model=model, contents=prompt)
         except Exception as e:
-            quota = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
+            msg = str(e)
+            quota = any(s in msg for s in ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE"))  # transient
             if not quota or attempt == tries - 1:
                 raise
             wait = base_delay * 2**attempt

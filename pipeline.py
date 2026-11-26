@@ -66,6 +66,30 @@ def unanalyzed_videos(workspace: Path) -> list[str]:
     ]
 
 
+def suggest_labels(workspace: Path) -> list[str]:
+    """Fill a placeholder band name from the scan, only when it is unambiguous: the event has exactly one
+    band and the file has exactly one segment. Marks label_source and never sets reviewed/approved, so a
+    person still confirms it in the review GUI. Returns the segments files it changed."""
+    from publish import is_placeholder_label
+
+    scan_file = workspace / "scan_result.json"
+    if not scan_file.exists():
+        return []
+    bands = [b.strip() for b in json.loads(scan_file.read_text(encoding="utf-8")).get("bands", []) if b and b.strip()]
+    if len(bands) != 1:
+        return []
+    changed = []
+    for seg_file in sorted(workspace.glob("*_segments.json")):
+        data = json.loads(seg_file.read_text(encoding="utf-8"))
+        segs = data.get("segments", [])
+        if len(segs) == 1 and is_placeholder_label(segs[0].get("label")):
+            segs[0]["label"] = bands[0]
+            segs[0]["label_source"] = "scan_bands"
+            seg_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            changed.append(seg_file.name)
+    return changed
+
+
 def plan(root: Path, scope: dict, processed_dir: Path | None = None) -> list[dict]:
     """One row per event folder: what to do (scan+analyze, analyze, nothing) and why."""
     processed = processed_dir or root / "_processed"
@@ -112,6 +136,7 @@ def run_events(rows: list[dict], processed_dir: Path, stop_file: Path) -> dict:
                     raise RuntimeError("scan_result.json appeared since planning; refusing to overwrite it")
                 scan_folder(folder, processed_dir)
             run_analyze(folder, processed_dir, non_interactive=True)
+            res["labels_suggested"] = suggest_labels(Path(row["workspace"]))
         except Exception as e:  # keep going; the report lists what failed
             res.update(ok=False, error=f"{type(e).__name__}: {e}")
             traceback.print_exc()

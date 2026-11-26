@@ -97,3 +97,42 @@ def test_backoff_retries_quota_then_raises_other_errors(monkeypatch):
         assert False
     except ValueError:
         pass
+
+
+def _workspace(tmp_path, bands, labels):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "scan_result.json").write_text(json.dumps({"bands": bands, "files": []}))
+    for i, label in enumerate(labels):
+        (ws / f"f{i}_segments.json").write_text(json.dumps({"segments": [{"id": 1, "label": label, "approved": True}]}))
+    return ws
+
+
+def test_suggest_labels_fills_only_unambiguous_placeholders(tmp_path):
+    ws = _workspace(tmp_path, ["Nep"], ["Unknown Artist", "Seems"])
+    assert pipeline.suggest_labels(ws) == ["f0_segments.json"]
+    first = json.loads((ws / "f0_segments.json").read_text())
+    assert first["segments"][0]["label"] == "Nep" and first["segments"][0]["label_source"] == "scan_bands"
+    assert json.loads((ws / "f1_segments.json").read_text())["segments"][0]["label"] == "Seems"
+    assert "reviewed" not in first
+
+
+def test_suggest_labels_skips_when_several_bands(tmp_path):
+    ws = _workspace(tmp_path, ["A", "B"], ["Unknown Artist"])
+    assert pipeline.suggest_labels(ws) == []
+
+
+def test_backoff_also_retries_503(monkeypatch):
+    monkeypatch.setattr(classify.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+
+    class Client:
+        class models:
+            @staticmethod
+            def generate_content(model, contents):
+                calls["n"] += 1
+                if calls["n"] < 2:
+                    raise Exception("503 UNAVAILABLE high demand")
+                return "ok"
+
+    assert classify._generate_with_backoff(Client, "m", "p") == "ok"
