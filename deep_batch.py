@@ -22,7 +22,7 @@ def find_year_folders(root_dir: Path, year_filter: str | None = None) -> list[Pa
 
 def find_event_folders(year_dir: Path) -> list[Path]:
     """Find event subfolders inside a year directory."""
-    return sorted(d for d in year_dir.iterdir() if d.is_dir() and not d.name.startswith("."))
+    return sorted(d for d in year_dir.iterdir() if d.is_dir() and not d.name.startswith((".", "_")))
 
 
 def run_deep_batch(

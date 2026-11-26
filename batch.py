@@ -16,7 +16,7 @@ def run_batch(
 ) -> None:
     year_folder = year_folder.resolve()
 
-    event_folders = sorted(d for d in year_folder.iterdir() if d.is_dir() and not d.name.startswith("."))
+    event_folders = sorted(d for d in year_folder.iterdir() if d.is_dir() and not d.name.startswith((".", "_")))
 
     if not event_folders:
         print(f"No subfolders found in: {year_folder}")

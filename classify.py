@@ -2,6 +2,7 @@ import json
 import re
 import os
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
@@ -78,6 +79,21 @@ def _heuristic_classify(folder_name: str, event_date, calendar_events: list) -> 
         "bands": bands,
         "notes": notes,
     }
+
+
+def _generate_with_backoff(client, model: str, prompt: str, tries: int = 4, base_delay: float = 5.0):
+    """generate_content, retrying quota errors (429 / RESOURCE_EXHAUSTED) with 5s, 10s, 20s waits.
+    Any other error, or the last failed try, is raised so the caller can log it and fall back."""
+    for attempt in range(tries):
+        try:
+            return client.models.generate_content(model=model, contents=prompt)
+        except Exception as e:
+            quota = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
+            if not quota or attempt == tries - 1:
+                raise
+            wait = base_delay * 2**attempt
+            print(f"  Gemini quota hit; retrying in {wait:.0f}s ({attempt + 1}/{tries - 1})")
+            time.sleep(wait)
 
 
 def scan_folder(folder: Path, output_dir: Path | None = None) -> dict:
@@ -160,9 +176,8 @@ Return a JSON object (no markdown, no explanation) with:
 
 Example: {{"event_date":"03.15.2024","event_name":"Final Friday","bands":["Band A","Band B"],"notes":"Monthly showcase at Suite E."}}"""
 
-            response = client.models.generate_content(
-                model=config.get("gemini_model", "gemini-2.0-flash"),
-                contents=prompt,
+            response = _generate_with_backoff(
+                client, config.get("gemini_model", "gemini-2.0-flash"), prompt
             )
 
             try:

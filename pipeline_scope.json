@@ -1,0 +1,13 @@
+{
+  "_comment": "Which event folders the scan-new runner may process. Patterns are case-insensitive, matched against the folder name.",
+  "exclude": [
+    "*wusf*",
+    "*sunday jazz*",
+    "*karaoke*",
+    "*karoke*",
+    "*antihill*",
+    "*dreamgaze sips*",
+    "*cinema*"
+  ],
+  "min_video_mb": 50
+}

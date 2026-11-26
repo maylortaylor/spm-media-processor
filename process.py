@@ -169,6 +169,11 @@ def main() -> None:
     info_p.add_argument("year_folder", type=Path)
     _add_output_dir(info_p)
 
+    new_p = sub.add_parser("scan-new", help="Safely scan + analyze every event folder not processed yet (no prompts)")
+    new_p.add_argument("root", type=Path, help="Year folder, e.g. E:\\2026")
+    new_p.add_argument("--dry-run", action="store_true", help="List what would run, change nothing")
+    new_p.add_argument("--limit", type=int, default=None, help="Only process the first N (smallest) folders")
+
     apply_p = sub.add_parser("apply-info", help="Apply a filled-in band_info.csv")
     apply_p.add_argument("sheet", type=Path, nargs="?", default=None)
 
@@ -292,6 +297,11 @@ def main() -> None:
         from inventory import run_inventory
 
         run_inventory(args.year_folder, output_dir=args.output_dir)
+
+    elif args.command == "scan-new":
+        from pipeline import run_scan_new
+
+        run_scan_new(args.root, dry_run=args.dry_run, limit=args.limit)
 
     elif args.command == "needs-info":
         from publish import run_needs_info
