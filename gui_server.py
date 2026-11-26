@@ -56,9 +56,10 @@ from config import (
     save_known_band,
 )
 from classify import scan_folder
-from analyze import run_analyze
+from analyze import extract_audio, run_analyze
 from export import run_export
 from metadata import run_metadata
+from publish import is_reviewed, run_apply_info, run_needs_info, run_publish, run_status
 
 load_dotenv()
 
@@ -192,6 +193,35 @@ jobs = JobManager()
 _review_ctx: dict[str, Path | None] = {"workspace": None, "segments_file": None}
 
 
+def _pick_segments_file(workspace: Path) -> Path | None:
+    """First segments file that hasn't been reviewed (incl. untrimmed auto-approved ones), else the first."""
+    files = sorted(workspace.glob("*_segments.json"))
+    for sf in files:
+        with open(sf) as f:
+            if not is_reviewed(json.load(f)):
+                return sf
+    return files[0] if files else None
+
+
+def _ensure_review_audio(seg_path: Path | None) -> None:
+    """Auto-approved files skip audio extraction in analyze; extract it now so they can be trimmed."""
+    if not seg_path or not seg_path.exists():
+        return
+    with open(seg_path) as f:
+        data = json.load(f)
+    if data.get("audio_file") and Path(data["audio_file"]).exists():
+        return
+    source = Path(data.get("source_file", ""))
+    if not source.exists():
+        return
+    audio = seg_path.with_name(source.stem + "_audio.mp3")
+    if not audio.exists():
+        extract_audio(source, audio, load_config())
+    data["audio_file"] = str(audio)
+    with open(seg_path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Routes — frontend shell
 # ═══════════════════════════════════════════════════════════════════════════
@@ -213,24 +243,46 @@ async def open_review_redirect(folder: str, output_dir: str = "", segments_file:
     folder_path = Path(folder)
     workspace = get_workspace(folder_path, Path(output_dir) if output_dir else None)
 
-    if segments_file:
-        seg_path = workspace / segments_file
-    else:
-        pending = []
-        for sf in sorted(workspace.glob("*_segments.json")):
-            with open(sf) as f:
-                d = json.load(f)
-            if not d.get("auto_approved") and not all(s.get("approved") for s in d.get("segments", [])):
-                pending.append(sf)
-        seg_path = (
-            pending[0]
-            if pending
-            else sorted(workspace.glob("*_segments.json"))[0]
-            if list(workspace.glob("*_segments.json"))
-            else None
-        )
+    seg_path = workspace / segments_file if segments_file else _pick_segments_file(workspace)
+    await asyncio.to_thread(_ensure_review_audio, seg_path)
 
     _review_ctx["workspace"] = workspace
+    _review_ctx["segments_file"] = seg_path
+    return RedirectResponse("/review")
+
+
+@app.get("/review/files")
+async def review_files():
+    """Segments files in the active workspace, for the review page's file switcher."""
+    ws = _review_ctx.get("workspace")
+    if not ws:
+        return JSONResponse({"files": []})
+    current = _review_ctx.get("segments_file")
+    files = []
+    for sf in sorted(Path(ws).glob("*_segments.json")):
+        with open(sf) as f:
+            d = json.load(f)
+        files.append(
+            {
+                "name": sf.name,
+                "source": Path(d.get("source_file", "")).name,
+                "labels": [s.get("label", "") for s in d.get("segments", [])],
+                "reviewed": is_reviewed(d),
+                "current": current is not None and Path(current) == sf,
+            }
+        )
+    return JSONResponse({"files": files})
+
+
+@app.get("/review/switch", include_in_schema=False)
+async def review_switch(segments_file: str):
+    ws = _review_ctx.get("workspace")
+    if not ws:
+        raise HTTPException(503, "No active review context")
+    seg_path = Path(ws) / segments_file
+    if seg_path.parent.resolve() != Path(ws).resolve() or not seg_path.exists():
+        raise HTTPException(404, "Segments file not found")
+    await asyncio.to_thread(_ensure_review_audio, seg_path)
     _review_ctx["segments_file"] = seg_path
     return RedirectResponse("/review")
 
@@ -379,11 +431,14 @@ def _event_status(workspace: Path) -> dict:
 
     all_approved = False
     needs_review = False
+    needs_trim = 0
     if seg_files:
         statuses = []
         for sf in seg_files:
             with open(sf) as f:
                 d = json.load(f)
+            if not is_reviewed(d):
+                needs_trim += 1
             if d.get("auto_approved"):
                 statuses.append("approved")
             elif all(s.get("approved") for s in d.get("segments", [])):
@@ -398,6 +453,7 @@ def _event_status(workspace: Path) -> dict:
         "analyzed": analyzed,
         "needs_review": needs_review,
         "all_approved": all_approved,
+        "needs_trim": needs_trim,  # files not yet trimmed/reviewed → can't publish
         "exported": len(exports) > 0,
         "export_count": len(exports),
     }
@@ -767,6 +823,54 @@ async def start_metadata_batch(request: Request):
     return {"job_id": job_id}
 
 
+@app.post("/api/publish")
+async def start_publish(request: Request):
+    """Render intro + set + outro (and Shorts) for one event or a whole year folder."""
+    body = await request.json()
+    folder = body.get("folder", "")
+    if not folder:
+        raise HTTPException(400, "folder required")
+    output_dir = _parse_output_dir(body.get("output_dir"))
+    job_id = jobs.submit(
+        run_publish,
+        Path(folder),
+        output_dir=output_dir,
+        dry_run=bool(body.get("dry_run")),
+        shorts=body.get("shorts", True),
+        videos=body.get("videos", True),
+    )
+    return {"job_id": job_id}
+
+
+@app.post("/api/needs-info")
+async def start_needs_info(request: Request):
+    body = await request.json()
+    folder = body.get("folder", "")
+    if not folder:
+        raise HTTPException(400, "folder required")
+    job_id = jobs.submit(run_needs_info, Path(folder), output_dir=_parse_output_dir(body.get("output_dir")))
+    return {"job_id": job_id}
+
+
+@app.post("/api/apply-info")
+async def start_apply_info(request: Request):
+    body = await request.json()
+    sheet = body.get("sheet")
+    job_id = jobs.submit(run_apply_info, Path(sheet) if sheet else None)
+    return {"job_id": job_id}
+
+
+@app.post("/api/status")
+async def start_status(request: Request):
+    body = await request.json()
+    folder = body.get("folder", "")
+    if not folder:
+        raise HTTPException(400, "folder required")
+    output_dir = _parse_output_dir(body.get("output_dir"))
+    job_id = jobs.submit(run_status, Path(folder), output_dir=output_dir)
+    return {"job_id": job_id}
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Routes — Job Status & SSE
 # ═══════════════════════════════════════════════════════════════════════════
@@ -813,17 +917,8 @@ async def review_start(request: Request):
     output_dir = _parse_output_dir(body.get("output_dir"))
     workspace = get_workspace(folder_path, output_dir)
 
-    if segments_file:
-        seg_path = workspace / segments_file
-    else:
-        # Pick first pending segments file
-        pending = []
-        for sf in sorted(workspace.glob("*_segments.json")):
-            with open(sf) as f:
-                d = json.load(f)
-            if not d.get("auto_approved") and not all(s.get("approved") for s in d.get("segments", [])):
-                pending.append(sf)
-        seg_path = pending[0] if pending else None
+    seg_path = workspace / segments_file if segments_file else _pick_segments_file(workspace)
+    await asyncio.to_thread(_ensure_review_audio, seg_path)
 
     _review_ctx["workspace"] = workspace
     _review_ctx["segments_file"] = seg_path

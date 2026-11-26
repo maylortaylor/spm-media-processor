@@ -325,6 +325,10 @@ function renderCard(event) {
     <div class="review-banner">
       <span>⚠ Segment review needed — verify set boundaries and band labels</span>
       <a class="btn btn-sm" href="${reviewUrl}" target="_blank">Open Waveform Review →</a>
+    </div>` : st.needs_trim ? `
+    <div class="review-banner">
+      <span>✂ ${st.needs_trim} recording(s) need trimming to just the band before publishing</span>
+      <a class="btn btn-sm" href="${reviewUrl}" target="_blank">Trim in Review →</a>
     </div>` : '';
 
   // Next-step hint when approved but not yet analyzed
@@ -382,6 +386,7 @@ function renderCard(event) {
       ${uiState === 'skipped' && sr && !st.analyzed ? `<button class="btn btn-xs btn-primary" data-action="analyze" data-folder="${fp}">Analyze</button>` : ''}
       ${sr ? `<button class="btn btn-xs" data-action="rescan" data-folder="${fp}">Re-scan</button>` : ''}
       ${st.exported ? `<button class="btn btn-xs" data-action="metadata" data-folder="${fp}">Generate Metadata</button>` : ''}
+      ${st.analyzed ? `<button class="btn btn-xs btn-primary" data-action="publish" data-folder="${fp}" title="Intro + trimmed set + outro, plus Shorts → _processed/YouTube and _processed/Shorts">Publish ▶</button>` : ''}
       <span style="flex:1"></span>
       ${sr && !sr.confirmed && uiState !== 'skipped' ? `<button class="btn btn-sm btn-green" data-action="approve" data-folder="${fp}">Approve ✓</button>` : ''}
       ${sr && sr.confirmed ? `<button class="btn btn-xs" data-action="unapprove" data-folder="${fp}">Edit</button>` : ''}
@@ -458,6 +463,11 @@ function bindCardEvents() {
   // Generate metadata
   document.querySelectorAll('[data-action="metadata"]').forEach(btn => {
     btn.addEventListener('click', () => runStage(btn.dataset.folder, 'metadata'));
+  });
+
+  // Publish intro + set + outro (and Shorts) to the _processed publish folder
+  document.querySelectorAll('[data-action="publish"]').forEach(btn => {
+    btn.addEventListener('click', () => runStage(btn.dataset.folder, 'publish'));
   });
 
   // Event name inline edit
@@ -635,6 +645,7 @@ async function runStage(folder, stage) {
     analyze: '/api/analyze',
     export: '/api/export',
     metadata: '/api/metadata',
+    publish: '/api/publish',
   };
   const ep = endpoints[stage];
   if (!ep) return;

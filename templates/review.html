@@ -55,6 +55,19 @@
   .btn-merge-selected:hover { background: #2a4a6a; }
   .btn-merge-selected.visible { display: block; }
 
+  .btn-add-segment {
+    width: 100%;
+    background: #1a3a1a;
+    border: 1px solid #3a7a3a;
+    color: #88ff88;
+    padding: 7px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    margin-bottom: 12px;
+  }
+  .btn-add-segment:hover { background: #2a5a2a; }
+
   .segment-card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 12px; margin-bottom: 10px; transition: border-color 0.2s; }
   .segment-card.approved { border-color: #3a8a3a; }
   .segment-card.deleted { opacity: 0.3; pointer-events: none; }
@@ -103,6 +116,27 @@
   .btn-save:disabled { opacity: 0.4; cursor: default; }
   .save-status { font-size: 0.8rem; color: #aaa; text-align: center; margin-top: 6px; min-height: 1.2em; }
 
+  .btn-add-short {
+    width: 100%;
+    background: #3a1a32;
+    border: 1px solid #a03a80;
+    color: #ff9ad8;
+    padding: 7px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    margin-bottom: 12px;
+  }
+  .btn-add-short:hover { background: #5a2a4a; }
+  .segment-card.short-card { border-color: #7a3a68; }
+  .shorts-heading { margin-top: 18px; }
+  .shorts-hint { font-size: 0.75rem; color: #777; margin-bottom: 8px; }
+
+  .trim-hint { font-size: 0.82rem; color: #ffcf77; background: #2a2210; border: 1px solid #6a5420; border-radius: 6px; padding: 6px 10px; margin-top: 8px; }
+  .file-switcher { margin-top: 8px; display: flex; gap: 8px; align-items: center; font-size: 0.8rem; color: #888; }
+  .file-switcher select { background: #111; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 3px 6px; max-width: 60vw; }
+  .next-file { color: #7eb8ff; }
+
   datalist { display: none; }
   .loading { padding: 40px; text-align: center; color: #666; }
 </style>
@@ -114,6 +148,11 @@
   <div class="meta" id="event-meta"></div>
   <div class="bands-on-bill" id="bands-on-bill"></div>
   <div id="source-filename" style="font-size:0.78rem;color:#666;margin-top:4px;font-family:monospace;"></div>
+  <div class="file-switcher" id="file-switcher" hidden></div>
+  <div class="trim-hint" id="trim-hint" hidden>
+    ✂ This is the whole raw recording. Drag the segment edges (or use Set Start / Set End) so it covers only the band's set,
+    check the band name, then Save. Only saved files get published.
+  </div>
 </header>
 
 <div class="main">
@@ -137,7 +176,12 @@
     <h2>Segments</h2>
     <button class="btn-merge-all" id="btn-merge-all" onclick="mergeAll()">⊕ Merge All → 1 Artist</button>
     <button class="btn-merge-selected" id="btn-merge-selected" onclick="mergeSelected()">⊕ Merge Selected</button>
+    <button class="btn-add-segment" id="btn-add-seg" onclick="addNewSegment()">+ Add Segment</button>
     <div id="segments-list"><div class="loading">Loading segments...</div></div>
+    <h2 class="shorts-heading">YouTube Shorts</h2>
+    <div class="shorts-hint">Highlight moments rendered as vertical clips (max 3 min). Move the marker, then add.</div>
+    <button class="btn-add-short" onclick="addShort()">✂ Add Short at Marker</button>
+    <div id="shorts-list"></div>
     <div class="save-bar">
       <button class="btn-save" id="btn-save">Save &amp; Close</button>
       <div class="save-status" id="save-status"></div>
@@ -167,8 +211,12 @@ let wsRegions = null;
 let ws = null;
 let zoomLevel = 20;
 
+const SHORT_COLOR = 'rgba(255,80,180,0.35)';
+const SHORT_DEFAULT_SEC = 45;
+
 let currentTime = 0;
 let nextSegId = 1;
+let nextShortId = 1;
 const selectedSegments = new Set();
 
 function formatTime(sec) {
@@ -245,6 +293,76 @@ function renderHeader() {
     document.getElementById('source-label').textContent = fname;
     document.getElementById('source-filename').textContent = fname;
   }
+  document.getElementById('trim-hint').hidden = !(segmentsData && segmentsData.auto_approved && !segmentsData.reviewed);
+}
+
+// File switcher (GUI server only — the legacy CLI review server has no /review/files)
+async function renderFileSwitcher(afterSave = false) {
+  let files = [];
+  try {
+    const res = await fetch('/review/files');
+    if (!res.ok) return;
+    files = (await res.json()).files || [];
+  } catch { return; }
+  if (files.length < 2) return;
+
+  const el = document.getElementById('file-switcher');
+  const options = files.map(f => {
+    const mark = f.reviewed ? '✓' : '•';
+    const labels = f.labels.filter(Boolean).join(', ');
+    return `<option value="${encodeURIComponent(f.name)}" ${f.current ? 'selected' : ''}>${mark} ${f.source}${labels ? ' — ' + labels : ''}</option>`;
+  }).join('');
+  const currentIdx = files.findIndex(f => f.current);
+  const next = files.find((f, i) => i > currentIdx && !f.reviewed) || files.find(f => !f.reviewed && !f.current);
+  const left = files.filter(f => !f.reviewed).length;
+  el.innerHTML = `File ${currentIdx + 1}/${files.length} (${left} to review):
+    <select onchange="location.href='/review/switch?segments_file=' + this.value">${options}</select>
+    ${next ? `<a class="next-file" href="/review/switch?segments_file=${encodeURIComponent(next.name)}">${afterSave ? 'Next file to review →' : 'Next unreviewed →'}</a>` : ''}`;
+  el.hidden = false;
+}
+
+function buildSegmentCard(seg) {
+  const duration = seg.end - seg.start;
+  const isApproved = seg.approved;
+  return `
+    <div class="segment-card ${isApproved ? 'approved' : ''}" id="card-${seg.id}">
+      <div class="seg-header">
+        <input type="checkbox" class="seg-select"
+          onchange="toggleSegmentSelect(${seg.id}, this.checked)">
+        <span class="seg-id">Segment ${seg.id}</span>
+        <span class="seg-duration">${formatDuration(duration)}</span>
+      </div>
+      <div class="seg-times">
+        <span id="start-${seg.id}">${formatTime(seg.start)}</span>
+        &nbsp;→&nbsp;
+        <span id="end-${seg.id}">${formatTime(seg.end)}</span>
+      </div>
+      <div class="seg-label-row">
+        <input class="seg-label" type="text" list="band-suggestions"
+          id="label-${seg.id}" value="${seg.label || ''}"
+          placeholder="Band name (e.g. The Midnight)"
+          onchange="updateLabel(${seg.id}, this.value)">
+      </div>
+      <div class="seg-label-row">
+        <span class="seg-duration">Intro/outro text</span>
+        <select class="seg-label" id="title-mode-${seg.id}" onchange="updateTitleMode(${seg.id}, this.value)">
+          ${titleModeOptions(seg.title_mode || 'band')}
+        </select>
+      </div>
+      <div class="seg-actions">
+        <button class="btn-locate" onclick="locateSegment(${seg.id}, 'start')">▶ Start</button>
+        <button class="btn-locate" onclick="locateSegment(${seg.id}, 'end')">▶ End</button>
+        <button class="btn-set-time" id="setstart-${seg.id}"
+          onclick="setSegmentTime(${seg.id}, 'start')">↑ Set Start</button>
+        <button class="btn-set-time" id="setend-${seg.id}"
+          onclick="setSegmentTime(${seg.id}, 'end')">↓ Set End</button>
+        <button class="btn-approve ${isApproved ? 'is-approved' : ''}" id="approve-${seg.id}"
+          onclick="toggleApprove(${seg.id})">
+          ${isApproved ? '✓ Approved' : 'Approve'}
+        </button>
+        <button class="btn-delete" onclick="deleteSegment(${seg.id})">✕</button>
+      </div>
+    </div>`;
 }
 
 function renderSegmentsList() {
@@ -258,48 +376,109 @@ function renderSegmentsList() {
     return;
   }
 
-  list.innerHTML = segs.map((seg, i) => {
-    const duration = seg.end - seg.start;
-    const isApproved = seg.approved;
-    return `
-      <div class="segment-card ${isApproved ? 'approved' : ''}" id="card-${seg.id}">
-        <div class="seg-header">
-          <input type="checkbox" class="seg-select"
-            onchange="toggleSegmentSelect(${seg.id}, this.checked)">
-          <span class="seg-id">Segment ${seg.id}</span>
-          <span class="seg-duration">${formatDuration(duration)}</span>
-        </div>
-        <div class="seg-times">
-          <span id="start-${seg.id}">${formatTime(seg.start)}</span>
-          &nbsp;→&nbsp;
-          <span id="end-${seg.id}">${formatTime(seg.end)}</span>
-        </div>
-        <div class="seg-label-row">
-          <input class="seg-label" type="text" list="band-suggestions"
-            id="label-${seg.id}" value="${seg.label || ''}"
-            placeholder="Band name (e.g. The Midnight)"
-            onchange="updateLabel(${seg.id}, this.value)">
-        </div>
-        <div class="seg-actions">
-          <button class="btn-locate" onclick="locateSegment(${seg.id}, 'start')">▶ Start</button>
-          <button class="btn-locate" onclick="locateSegment(${seg.id}, 'end')">▶ End</button>
-          <button class="btn-set-time" id="setstart-${seg.id}"
-            onclick="setSegmentTime(${seg.id}, 'start')">↑ Set Start</button>
-          <button class="btn-set-time" id="setend-${seg.id}"
-            onclick="setSegmentTime(${seg.id}, 'end')">↓ Set End</button>
-          <button class="btn-approve ${isApproved ? 'is-approved' : ''}" id="approve-${seg.id}"
-            onclick="toggleApprove(${seg.id})">
-            ${isApproved ? '✓ Approved' : 'Approve'}
-          </button>
-          <button class="btn-delete" onclick="deleteSegment(${seg.id})">✕</button>
-        </div>
-      </div>`;
-  }).join('');
+  list.innerHTML = segs.map(seg => buildSegmentCard(seg)).join('');
 }
 
 function findSeg(id) {
   return segmentsData.segments.find(s => s.id === id);
 }
+
+// What the published intro/outro says: band name, event name (from the dashboard), or both
+function titleModeOptions(selected) {
+  const ev = (scanData && scanData.event_name) || '';
+  const opts = [
+    ['band', 'Band name'],
+    ['event', ev ? `Event name (${ev})` : 'Event name (set it on the dashboard card)'],
+    ['both', ev ? `Both — "${ev} at Suite E" + band` : 'Both (needs an event name)'],
+  ];
+  return opts.map(([v, t]) => `<option value="${v}" ${v === selected ? 'selected' : ''}>${t}</option>`).join('');
+}
+
+window.updateTitleMode = (id, value) => {
+  const seg = findSeg(id);
+  if (seg) seg.title_mode = value;
+};
+
+// ── Shorts ────────────────────────────────────────────────────────────────
+function findShort(id) {
+  return (segmentsData.shorts || []).find(s => s.id === id);
+}
+
+function buildShortCard(sh) {
+  return `
+    <div class="segment-card short-card" id="short-card-${sh.id}">
+      <div class="seg-header">
+        <span class="seg-id">Short ${sh.id}</span>
+        <span class="seg-duration" id="short-dur-${sh.id}">${formatDuration(sh.end - sh.start)}</span>
+      </div>
+      <div class="seg-times">
+        <span id="short-start-${sh.id}">${formatTime(sh.start)}</span>
+        &nbsp;→&nbsp;
+        <span id="short-end-${sh.id}">${formatTime(sh.end)}</span>
+      </div>
+      <div class="seg-label-row">
+        <input class="seg-label" type="text" list="band-suggestions"
+          id="short-label-${sh.id}" value="${sh.label || ''}"
+          placeholder="Band (blank = segment's band)"
+          onchange="updateShortLabel(${sh.id}, this.value)">
+      </div>
+      <div class="seg-actions">
+        <button class="btn-locate" onclick="playShort(${sh.id})">▶ Play</button>
+        <button class="btn-set-time" id="short-setstart-${sh.id}" onclick="setShortTime(${sh.id}, 'start')">↑ Set Start</button>
+        <button class="btn-set-time" id="short-setend-${sh.id}" onclick="setShortTime(${sh.id}, 'end')">↓ Set End</button>
+        <button class="btn-delete" onclick="deleteShort(${sh.id})">✕</button>
+      </div>
+    </div>`;
+}
+
+function renderShortsList() {
+  document.getElementById('shorts-list').innerHTML = (segmentsData.shorts || []).map(buildShortCard).join('');
+}
+
+function refreshShortTimes(sh) {
+  document.getElementById(`short-start-${sh.id}`).textContent = formatTime(sh.start);
+  document.getElementById(`short-end-${sh.id}`).textContent = formatTime(sh.end);
+  document.getElementById(`short-dur-${sh.id}`).textContent = formatDuration(sh.end - sh.start);
+}
+
+window.addShort = () => {
+  const total = ws ? ws.getDuration() : (segmentsData.duration || 0);
+  const start = Math.min(currentTime, Math.max(total - 1, 0));
+  const sh = { id: nextShortId++, start, end: Math.min(start + SHORT_DEFAULT_SEC, total), label: '' };
+  segmentsData.shorts.push(sh);
+  renderShortsList();
+  addRegions();
+  document.getElementById(`short-card-${sh.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+
+window.updateShortLabel = (id, value) => {
+  const sh = findShort(id);
+  if (sh) sh.label = value;
+};
+
+window.deleteShort = (id) => {
+  segmentsData.shorts = segmentsData.shorts.filter(s => s.id !== id);
+  document.getElementById(`short-card-${id}`)?.remove();
+  wsRegions?.getRegions().find(r => r.id === `short-${id}`)?.remove();
+};
+
+window.setShortTime = (id, which) => {
+  const sh = findShort(id);
+  if (!sh || !ws) return;
+  const btn = document.getElementById(`short-set${which}-${id}`);
+  if (which === 'start' && currentTime >= sh.end) { flashError(btn, 'Before end only'); return; }
+  if (which === 'end' && currentTime <= sh.start) { flashError(btn, 'After start only'); return; }
+  sh[which] = currentTime;
+  refreshShortTimes(sh);
+  wsRegions?.getRegions().find(r => r.id === `short-${id}`)?.setOptions({ [which]: currentTime });
+};
+
+window.playShort = (id) => {
+  const sh = findShort(id);
+  if (!sh || !ws) return;
+  ws.seekTo(sh.start / ws.getDuration());
+  ws.play();
+};
 
 window.updateLabel = (id, value) => {
   const seg = findSeg(id);
@@ -375,6 +554,36 @@ window.mergeSelected = () => {
   updateMergeSelectedVisibility();
 };
 
+window.addNewSegment = () => {
+  const totalDuration = ws ? ws.getDuration() : 0;
+  const start = Math.min(currentTime, Math.max(totalDuration - 1, 0));
+  const end = Math.min(start + 300, totalDuration);
+  const newId = nextSegId++;
+
+  const seg = {
+    id: newId,
+    start,
+    end,
+    start_hhmmss: formatTime(start),
+    end_hhmmss: formatTime(end),
+    label: '',
+    approved: false,
+  };
+
+  segmentsData.segments.push(seg);
+
+  const list = document.getElementById('segments-list');
+  const placeholder = list.querySelector('.loading');
+  if (placeholder) placeholder.remove();
+
+  list.insertAdjacentHTML('beforeend', buildSegmentCard(seg));
+  addRegions();
+
+  const card = document.getElementById(`card-${newId}`);
+  card?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.getElementById(`label-${newId}`)?.focus();
+};
+
 window.toggleSegmentSelect = (id, checked) => {
   if (checked) selectedSegments.add(id);
   else selectedSegments.delete(id);
@@ -426,6 +635,17 @@ function addRegions() {
       resize: true,
     });
   });
+  (segmentsData.shorts || []).forEach(sh => {
+    wsRegions.addRegion({
+      id: `short-${sh.id}`,
+      start: sh.start,
+      end: sh.end,
+      color: SHORT_COLOR,
+      content: `Short ${sh.id}`,
+      drag: true,
+      resize: true,
+    });
+  });
 }
 
 function zoomToFit() {
@@ -443,9 +663,15 @@ async function init() {
   nextSegId = segmentsData.segments.length
     ? Math.max(...segmentsData.segments.map(s => s.id)) + 1
     : 1;
+  segmentsData.shorts = segmentsData.shorts || [];
+  nextShortId = segmentsData.shorts.length
+    ? Math.max(...segmentsData.shorts.map(s => s.id)) + 1
+    : 1;
 
   renderHeader();
   renderSegmentsList();
+  renderShortsList();
+  renderFileSwitcher();
 
   if (!segmentsData || !segmentsData.audio_file) {
     document.getElementById('waveform').innerHTML =
@@ -509,6 +735,14 @@ async function init() {
 
   // Sync region drags back to data
   wsRegions.on('region-updated', (region) => {
+    if (region.id.startsWith('short-')) {
+      const sh = findShort(parseInt(region.id.replace('short-', '')));
+      if (!sh) return;
+      sh.start = region.start;
+      sh.end = region.end;
+      refreshShortTimes(sh);
+      return;
+    }
     const id = parseInt(region.id.replace('seg-', ''));
     const seg = findSeg(id);
     if (!seg) return;
@@ -555,6 +789,12 @@ async function save() {
     const input = document.getElementById(`label-${seg.id}`);
     if (input) seg.label = input.value;
   });
+  (segmentsData.shorts || []).forEach(sh => {
+    const input = document.getElementById(`short-label-${sh.id}`);
+    if (input) sh.label = input.value;
+  });
+  // Saving from review = trims and labels confirmed → eligible for `process.py publish`
+  segmentsData.reviewed = true;
 
   try {
     const res = await fetch('/save', {
@@ -564,6 +804,9 @@ async function save() {
     });
     if (res.ok) {
       status.textContent = 'Saved! You can close this window.';
+      document.getElementById('trim-hint').hidden = true;
+      btn.disabled = false;
+      renderFileSwitcher(true);
     } else {
       throw new Error('Server error');
     }

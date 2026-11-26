@@ -122,6 +122,11 @@ def guess_artist_from_filename(stem: str) -> str | None:
     Returns None when the pattern isn't recognizable.
     """
     name = re.sub(r"-\d{3}$", "", stem).strip()
+    # Drop recorder-generated parts: '3.27 - CHRISS - OBS_ProgramOut_1080p_...' → '3.27 - CHRISS'
+    name = re.sub(r"_?(OBS_ProgramOut|SonyWide\d*k?)[^ ]*.*$", "", name, flags=re.IGNORECASE).strip(" -_")
+    name = re.sub(r"(\s*-\s*)?\b(vertical|4k|1080p)\b", "", name, flags=re.IGNORECASE).strip(" -_")
+    if not name or re.fullmatch(r"(C\d{4}|P\d+)", name, flags=re.IGNORECASE):
+        return None
 
     if " - " in name:
         parts = [p.strip() for p in name.split(" - ") if p.strip()]

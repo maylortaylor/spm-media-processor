@@ -21,7 +21,33 @@ python process.py metadata    <folder>    # generate YouTube metadata JSON
 python process.py batch       <year-dir>  # scan → analyze → review → export per subfolder
 python process.py rename      <folder>    # copy-rename images/short clips by EXIF source
 python process.py deep-batch  <root-dir>  # process all years under a root directory
+python process.py status      <year-dir>  # to-do report: scan/analyze/trim/label/ready per set (+ CSV)
+python process.py publish     <folder|year-dir> [--dry-run]  # intro + trimmed set + outro, plus Shorts
 ```
+
+## Publish workflow (YouTube-ready output)
+
+`publish.py` renders reviewed sets into `publish_dir` (default `_processed/` next to the year folders, e.g. `E:\_processed`):
+
+```
+E:\_processed\
+  _assets\logo.png               ← SUITE E logo for the overlay; cards\ = generated overlay PNGs
+  YouTube\MM.DD.YYYY - Band - Live at Suite E Studios.mp4 (+ .json metadata)
+  Shorts\MM.DD.YYYY - Band - Short N.mp4 (+ .json)   ← 1080x1920, blurred fill, ≤ 180s incl. cards
+  publish_manifest.json          ← output → source/start/end; detects "stale" trims
+  _status_2026.csv
+```
+
+- A segment is publishable when: `approved`, the segments file is **reviewed**, and the label isn't a placeholder (`OBS_ProgramOut…`, `C0022`, `P1`, `Set 1`, `Unknown Artist`).
+- **Reviewed** = saved from the review UI (`"reviewed": true`), or legacy non-auto-approved files with all segments approved. Auto-approved files are the whole raw recording, so they must be trimmed in review first.
+- Review UI: opening an auto-approved file extracts its audio on demand (`_ensure_review_audio`). "✂ Add Short" stores `shorts: [{id,start,end,label}]` in the segments JSON. A file switcher (`/review/files`, `/review/switch`) steps through every file in the event.
+- Rendering is a single re-encode pass (filter_complex concat). The encoder is auto-probed in this order: nvenc → amf → qsv → libx264; this machine uses `h264_amf` at ~3× realtime. Existing outputs are never overwritten. Renders write to `*.partial.mp4` and get renamed when finished.
+- Default `publish_style: "overlay"` copies the OBS "YouTube Main Page" scene: "{Band} at / Suite E Studios" top-right, band + `publish_url` bottom-center, Roboto SemiCondensed Light. Over the set it fades in (2.5s), holds 15s and fades out, at the start and again before the end. The logo is added only for non-OBS sources, since OBS recordings already have the bug burned in. Shorts get the same type style for the whole clip. `publish_style: "cards"` brings back the separate title cards (`_assets/intro.png`/`outro.png`).
+- Default `publish_style: "bumper"` (OBS `LOGO  WIDE blur` scene): the first and last ~22s show blurred footage with the big SUITE E logo. The title text fades in after a 1.5s lead, holds 15s and fades out, then the video crossfades to clean (the end mirrors this). Renders in pieces (bumper clips + plain middle + one audio encode) joined with a lossless concat, ~2.8× realtime on AMF.
+- Per-set `title_mode` (review dropdown): `band` → "{band} at / Suite E Studios" + band; `event` → event name in both spots; `both` → "{event} at / Suite E Studios" top-right + band at the bottom. The event name is the dashboard event name (`scan_result.event_name`), or `event_title` on the segment.
+- **Unknown bands → review queue.** `process.py needs-info <year>` (also run automatically after `status` and after any `publish` that skipped sets) writes `{publish_dir}/_needs_band_info/`: `band_info.csv` (one row per unpublished set with a placeholder label) plus a 2x2 preview JPG for each. The sheet has columns band, suggestions (filename guess → bands.txt → folder name → scan), event_name, title_mode, start/end (H:MM:SS) and times_ok. Answers already typed in are kept when the sheet regenerates. `process.py apply-info <csv>` writes them back (`label`, `title_mode`, `event_title`, trim). `times_ok=yes` also sets approved + `reviewed`.
+- **`bands.txt` in an event folder** (applied by needs-info and publish; only placeholder labels are touched): `event: Name` sets the event title, `filename-part = Band` maps recordings to bands, and a single bare band name names every unnamed set in that folder.
+- Config keys: `publish_*` and `shorts_*` in `config.py` DEFAULTS.
 
 Required env var: `ANTHROPIC_API_KEY` (in `.env` or shell)
 FFmpeg must be installed and in PATH (or set in `config.json` / ⚙ Settings).

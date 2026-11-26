@@ -15,6 +15,12 @@ Usage:
   python process.py deep-batch <root-dir> [--output-dir D] [opts] Process all years under a root dir
   python process.py clean-audio <target> [--output-dir D] [--mode M] [--notch-freq HZ] [--strength N]
                                                                    Remove whine/noise from exported MP4s
+  python process.py status     <year-folder> [--output-dir D]     What still needs scan/analyze/trim/labels
+  python process.py publish    <folder|year-folder> [--dry-run] [--no-shorts] [--shorts-only]
+                                                                   Render intro + set + outro (and Shorts)
+                                                                   into publish_dir (e.g. E:\\_processed)
+  python process.py needs-info <year-folder>                       Preview images + sheet for sets with no band name
+  python process.py apply-info <band_info.csv>                     Write the filled-in band info back
 
 All commands read default_output_dir from config.json when --output-dir is not given.
 All intermediate files and output clips go to output_dir/event_folder_name/ — originals untouched.
@@ -144,6 +150,28 @@ def main() -> None:
     )
     clean_p.add_argument("--list-presets", action="store_true", help="List all saved presets and exit")
 
+    status_p = sub.add_parser("status", help="Report what each event still needs before publishing")
+    status_p.add_argument("year_folder", type=Path)
+    _add_output_dir(status_p)
+
+    inv_p = sub.add_parser("inventory", help="ffprobe inventory per event (durations, cameras, photos, upgrade candidates)")
+    inv_p.add_argument("year_folder", type=Path)
+    _add_output_dir(inv_p)
+
+    publish_p = sub.add_parser("publish", help="Render YouTube videos + Shorts with intro/outro cards")
+    publish_p.add_argument("target", type=Path, help="Event folder or year folder")
+    _add_output_dir(publish_p)
+    publish_p.add_argument("--dry-run", action="store_true", help="List what would be rendered")
+    publish_p.add_argument("--no-shorts", action="store_true", help="Only render full videos")
+    publish_p.add_argument("--shorts-only", action="store_true", help="Only render Shorts")
+
+    info_p = sub.add_parser("needs-info", help="Build the band-info review sheet for sets with no band name")
+    info_p.add_argument("year_folder", type=Path)
+    _add_output_dir(info_p)
+
+    apply_p = sub.add_parser("apply-info", help="Apply a filled-in band_info.csv")
+    apply_p.add_argument("sheet", type=Path, nargs="?", default=None)
+
     args = parser.parse_args()
 
     if args.command == "configure":
@@ -254,6 +282,37 @@ def main() -> None:
                 save_preset_name=args.save_preset,
                 config=cfg,
             )
+
+    elif args.command == "status":
+        from publish import run_status
+
+        run_status(args.year_folder, output_dir=args.output_dir)
+
+    elif args.command == "inventory":
+        from inventory import run_inventory
+
+        run_inventory(args.year_folder, output_dir=args.output_dir)
+
+    elif args.command == "needs-info":
+        from publish import run_needs_info
+
+        run_needs_info(args.year_folder, output_dir=args.output_dir)
+
+    elif args.command == "apply-info":
+        from publish import run_apply_info
+
+        run_apply_info(args.sheet)
+
+    elif args.command == "publish":
+        from publish import run_publish
+
+        run_publish(
+            args.target,
+            output_dir=args.output_dir,
+            dry_run=args.dry_run,
+            shorts=not args.no_shorts,
+            videos=not args.shorts_only,
+        )
 
 
 if __name__ == "__main__":
