@@ -343,8 +343,12 @@ async def delete_band(name: str):
 
 
 @app.get("/api/browse")
-async def browse_folder():
-    """Open a native OS folder picker and return the selected path."""
+def browse_folder():
+    """Open a native OS folder picker and return the selected path.
+
+    Plain `def` on purpose: FastAPI runs it in a worker thread, so a dialog that is open (or hidden behind
+    another window) no longer freezes every other request. The 120s timeout still applies to this call only.
+    """
     try:
         if sys.platform == "darwin":
             # osascript is far more reliable than tkinter on macOS — always comes to front
